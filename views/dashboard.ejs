@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Bot Dashboard</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        background-color: #1c1c1c;
+        color: white;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-top: 50px;
+      }
+      #status-container {
+        background-color: #333;
+        padding: 10px 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+      }
+      #qr-container {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        width: 250px;
+        height: 250px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      #qr {
+        max-width: 100%;
+      }
+      h1,
+      h2,
+      h3 {
+        color: #4caf50;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>WhatsApp Bot Dashboard</h1>
+    <div id="status-container">
+      <h3>Status: <span id="status-text">Connecting...</span></h3>
+    </div>
+    <div id="qr-container">
+      <canvas id="qr"></canvas>
+      <h2 id="qr-message">Waiting for QR Code...</h2>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+
+    <script>
+      const socket = io();
+
+      const statusText = document.getElementById("status-text");
+      const qrCanvas = document.getElementById("qr");
+      const qrMessage = document.getElementById("qr-message");
+
+      socket.on("status_update", (data) => {
+        console.log("Status Update:", data.status);
+        statusText.textContent = data.status;
+        // If connected, hide the QR code area
+        if (data.status === "Connected") {
+          qrCanvas.style.display = "none";
+          qrMessage.style.display = "block";
+          qrMessage.textContent = "Successfully Connected! ✅";
+        }
+      });
+
+      socket.on("qr_update", (qrString) => {
+        console.log("QR Code Received");
+        qrCanvas.style.display = "block";
+        qrMessage.style.display = "none";
+        // Use QRious library to generate QR code on the canvas
+        new QRious({
+          element: qrCanvas,
+          value: qrString,
+          size: 250,
+        });
+      });
+    </script>
+  </body>
+</html>

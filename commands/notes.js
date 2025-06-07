@@ -1,0 +1,28 @@
+// file: /commands/notes.js
+const { readJSON } = require("../utils/storage.js");
+const notesPath = "./config/group_notes.json";
+
+module.exports = {
+  name: "notes",
+  description: "Lists all saved note keywords for the group.",
+  chat: "all",
+
+  async execute(sock, msg) {
+    const groupId = msg.key.remoteJid;
+    const notes = readJSON(notesPath);
+    const groupNotes = notes[groupId] || {};
+    const keywords = Object.keys(groupNotes);
+
+    if (keywords.length === 0) {
+      return await sock.sendMessage(groupId, {
+        text: "لا توجد ملاحظات محفوظة في هذا الجروب.",
+      });
+    }
+
+    let reply = "*🔑 الكلمات المفتاحية للملاحظات المحفوظة:*\n\n";
+    reply += keywords.map((kw) => `\`#${kw}\``).join("\n");
+    reply += "\n\nللحصول على ملاحظة، استخدم: `!note #keyword`";
+
+    await sock.sendMessage(groupId, { text: reply });
+  },
+};

@@ -1,0 +1,8 @@
+node_modules
+.env
+auth_info_baileys
+config
+logs
+bot.log
+bot.zip
+my-ver.zip
