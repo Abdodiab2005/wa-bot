@@ -20,6 +20,7 @@ const config = require("./config/config.json"); // 1. تحميل ملف الإع
 const { initializeScheduledJobs } = require("./scheduler.js");
 const normalizeJid = require("./utils/normalizeJid");
 const { executeRemoveAll, executeSendInvite } = require("./utils/executes");
+const { getGroupSettings } = require("./utils/storage.js");
 
 let retryCount = 0;
 const MAX_RETRIES = 5; // أقصى عدد للمحاولات
@@ -49,8 +50,19 @@ const commandFiles = fs
 
 for (const file of commandFiles) {
   const command = require(`./commands/${file}`);
-  commands.set(command.name, command);
-  logger.info(`[Commands] Loaded command: ${command.name}`);
+  if (command.name) {
+    // Register the main command name
+    commands.set(command.name, command);
+    logger.info(`[Commands] Loaded command: ${command.name}`);
+
+    // If the command has aliases, register them too
+    if (command.aliases && Array.isArray(command.aliases)) {
+      command.aliases.forEach((alias) => {
+        commands.set(alias, command);
+        logger.info(` -> Registered alias: ${alias}`);
+      });
+    }
+  }
 }
 
 async function connectToWhatsApp() {
@@ -186,6 +198,50 @@ async function connectToWhatsApp() {
 
   sock.ev.on("messages.upsert", async (m) => {
     const msg = m.messages[0];
+    // --- ✅ ADD THE BLACKLIST CHECK HERE ---
+    if (msg.key.remoteJid.endsWith("@g.us")) {
+      // Only check in groups
+      const groupId = msg.key.remoteJid;
+      const senderId = normalizeJid(msg.key.participant || msg.key.remoteJid);
+
+      // --- ✅ ADD THIS DEBUGGING BLOCK TEMPORARILY ---
+      console.log("\n--- OWNER CHECK DEBUG ---");
+      console.log(
+        `[1] Sender ID from WA: ${msg.key.participant || msg.key.remoteJid}`
+      );
+      console.log(`[2] Normalized Sender ID: ${senderId}`);
+      console.log(
+        `[3] Owners Array from Config: [${config.owners.join(", ")}]`
+      );
+      console.log(`[4] Is in Array? ${config.owners.includes(senderId)}`);
+      console.log("------------------------\n");
+      // --- END OF DEBUGGING BLOCK ---
+
+      const isGroup = msg.key.remoteJid.endsWith("@g.us");
+
+      try {
+        const settings = getGroupSettings(groupId);
+        const isBlacklisted = settings?.blacklist?.includes(senderId);
+
+        if (isBlacklisted) {
+          // Before ignoring, make sure the sender is not an admin, so admins can still use the bot
+          const groupMetadata = await sock.groupMetadata(groupId);
+          const senderIsAdmin = groupMetadata.participants.find(
+            (p) => p.id === senderId
+          )?.admin;
+
+          if (!senderIsAdmin) {
+            logger.info(
+              `Ignoring message from blacklisted user ${senderId} in group ${groupId}`
+            );
+            return; // Stop processing the message entirely
+          }
+        }
+      } catch (error) {
+        logger.error({ err: error }, "Error during blacklist check");
+      }
+    }
+    // --- END OF BLACKLIST CHECK ---
     if (!msg.message || msg.key.remoteJid === "status@broadcast") return;
 
     const body =
@@ -230,7 +286,9 @@ async function connectToWhatsApp() {
         ? await sock.groupMetadata(msg.key.remoteJid)
         : null;
 
-      const isOwner = config.owners.includes(normalizeJid(senderId));
+      const isOwner =
+        config.owners.includes(normalizeJid(senderId)) ||
+        (msg.key.fromMe && body?.startsWith(prefix));
       const isSenderAdmin =
         isGroup &&
         groupMetadata.participants.some(
@@ -275,7 +333,7 @@ async function connectToWhatsApp() {
           text: "⚠️ لا يمكنني تنفيذ هذا الأمر لأني لست مشرفًا في هذا الجروب.",
         });
 
-      logger.info(`[Commands] Executing command: ${commandName}`);
+      console.log(`[Commands] Executing command: ${commandName}`);
       try {
         await command.execute(
           sock,
@@ -286,7 +344,31 @@ async function connectToWhatsApp() {
           confirmationSessions
         );
       } catch (error) {
-        logger.error(`[Error] in command ${commandName}:`, error);
+        // --- RESPECTABLE DEBUGGING BLOCK ---
+        console.log("\n--- !!! UNHANDLED COMMAND ERROR CAUGHT !!! ---");
+        // Log basic, safe properties first
+        console.log(`[ERROR NAME]: ${error.name}`);
+        console.log(`[ERROR MESSAGE]: ${error.message}`);
+        // Log the stack trace for context
+        console.log(`[ERROR STACK]:\n${error.stack}`);
+        console.log("--- END OF DEBUG ---");
+
+        // Use the logger with a clean, safe object
+        logger.error(
+          {
+            command: commandName,
+            error: {
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+            },
+          },
+          `An error occurred in command: ${commandName}`
+        );
+
+        await sock.sendMessage(msg.key.remoteJid, {
+          text: `حدث خطأ فني أثناء تنفيذ الأمر: ${commandName}`,
+        });
       }
     } else {
       // --- This block handles REGULAR MESSAGES (for Anti-Link) ---
@@ -305,6 +387,61 @@ async function connectToWhatsApp() {
       if (!mediaActionTaken) {
         await handleAntiLink(sock, msg, config, normalizeJid);
       }
+    }
+  });
+
+  sock.ev.on("group-participants.update", async (update) => {
+    const { id, participants, action } = update;
+    logger.info({ update }, "Received group participants update");
+
+    // We only care about the 'add' action
+    if (action !== "add") {
+      logger.info(`[Group] ${action} action for ${id}`);
+      return;
+    }
+
+    try {
+      const settings = getGroupSettings(id);
+      const welcomeConfig = settings?.welcome_system;
+
+      // Stop if the welcome system is disabled or has no messages
+      if (
+        !welcomeConfig ||
+        !welcomeConfig.enabled ||
+        welcomeConfig.messages.length === 0
+      ) {
+        logger.warn(
+          `[Group] Welcome system is disabled or has no messages for ${id}`
+        );
+        return;
+      }
+
+      // Loop through each new participant
+      for (const participant of participants) {
+        // Pick a random message from the array
+        const randomIndex = Math.floor(
+          Math.random() * welcomeConfig.messages.length
+        );
+        const welcomeMessage = welcomeConfig.messages[randomIndex];
+
+        // Replace the placeholder ${user} with a mention
+        const finalMessage = welcomeMessage.replace(
+          /\${user}/g,
+          `@${participant.split("@")[0]}`
+        );
+
+        // Send the welcome message with a small delay
+        await delay(1000); // 1-second delay
+        await sock.sendMessage(id, {
+          text: finalMessage,
+          mentions: [participant],
+        });
+      }
+    } catch (error) {
+      logger.error(
+        { err: error, update },
+        "Error in group-participants.update event"
+      );
     }
   });
 }

@@ -112,6 +112,29 @@ function deleteNote(groupId, keyword) {
   return info.changes > 0; // Returns true if a row was deleted, false otherwise
 }
 
+function getChatHistory(chatId) {
+  const query = db.prepare("SELECT history FROM ai_history WHERE chat_id = ?");
+  const row = query.get(chatId);
+  return row ? JSON.parse(row.history) : [];
+}
+
+function saveChatHistory(chatId, historyArray) {
+  const query = db.prepare(
+    "INSERT OR REPLACE INTO ai_history (chat_id, history) VALUES (?, ?)"
+  );
+  query.run(chatId, JSON.stringify(historyArray));
+}
+
+function deleteChatHistory(chatId) {
+  const query = db.prepare("DELETE FROM ai_history WHERE chat_id = ?");
+  return query.run(chatId).changes > 0;
+}
+
+function deleteAllChatHistories() {
+  const query = db.prepare("DELETE FROM ai_history");
+  query.run();
+}
+
 // We will add more functions here later for notes, warnings, etc.
 module.exports = {
   getGroupSettings,
@@ -125,4 +148,8 @@ module.exports = {
   getNote,
   getAllNotes,
   deleteNote,
+  getChatHistory,
+  saveChatHistory,
+  deleteChatHistory,
+  deleteAllChatHistories,
 };

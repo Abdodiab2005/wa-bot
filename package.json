@@ -13,6 +13,7 @@
   "type": "commonjs",
   "dependencies": {
     "@distube/ytdl-core": "^4.16.11",
+    "@google/generative-ai": "^0.24.1",
     "@whiskeysockets/baileys": "^6.7.18",
     "axios": "^1.9.0",
     "better-sqlite3": "^11.10.0",
@@ -24,6 +25,7 @@
     "node-cron": "^4.1.0",
     "pino": "^9.7.0",
     "pino-pretty": "^13.0.0",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "socket.io": "^4.8.1",
     "uuid": "^11.1.0"
