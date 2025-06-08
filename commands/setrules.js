@@ -1,31 +1,14 @@
-// file: /commands/setrules.js
-const fs = require("fs");
-const settingsPath = "./config/group_settings.json";
+const { getGroupSettings, saveGroupSettings } = require("../utils/storage.js");
 const logger = require("../utils/logger");
-
-// Helper function to read settings
-function getSettings() {
-  if (!fs.existsSync(settingsPath)) {
-    fs.writeFileSync(settingsPath, JSON.stringify({}));
-  }
-  return JSON.parse(fs.readFileSync(settingsPath));
-}
-
-// Helper function to write settings
-function saveSettings(settings) {
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-}
 
 module.exports = {
   name: "setrules",
   description: "Sets the rules for the current group.",
   chat: "group",
-  userAdminRequired: true, // Only admins can set rules
+  userAdminRequired: true,
 
   async execute(sock, msg, args) {
     const groupId = msg.key.remoteJid;
-
-    // The entire text after the command is considered the rules
     const rulesText = args.join(" ");
 
     if (!rulesText) {
@@ -35,23 +18,24 @@ module.exports = {
     }
 
     try {
-      const settings = getSettings();
+      // 1. Get the settings object. It will be {} if the group is new.
+      const settings = getGroupSettings(groupId);
 
-      // Initialize settings for the group if it doesn't exist
-      if (!settings[groupId]) {
-        settings[groupId] = {};
-      }
+      // 2. Add or update the 'rules' property on the object.
+      settings.rules = rulesText;
 
-      // Set the rules
-      settings[groupId].rules = rulesText;
-
-      saveSettings(settings);
+      // 3. Save the entire updated settings object back to the database.
+      saveGroupSettings(groupId, settings);
 
       await sock.sendMessage(groupId, {
-        text: "✅ تم حفظ قواعد الجروب بنجاح.",
+        text: "✅ تم حفظ قواعد الجروب بنجاح في قاعدة البيانات.",
       });
     } catch (error) {
-      logger.error("[Error] in !setrules command:", error);
+      // Improved logging for better debugging
+      logger.error(
+        { err: error, groupId: groupId },
+        "Error in !setrules command"
+      );
       await sock.sendMessage(groupId, { text: "حدث خطأ أثناء حفظ القواعد." });
     }
   },

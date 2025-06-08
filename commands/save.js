@@ -1,11 +1,12 @@
-// file: /commands/save.js
-const { readJSON, writeJSON } = require("../utils/storage.js");
-const notesPath = "./config/group_notes.json";
+// file: /commands/save.js (Refactored for SQLite)
+const { saveNote } = require("../utils/storage.js");
+const logger = require("../utils/logger");
 
 module.exports = {
   name: "save",
   description: "Saves a new note for the group.",
-  chat: "all",
+  chat: "group",
+  userAdminRequired: true,
 
   async execute(sock, msg, args) {
     const groupId = msg.key.remoteJid;
@@ -18,18 +19,17 @@ module.exports = {
       });
     }
 
-    const keyword = keywordArg.slice(1).toLowerCase(); // Remove '#' and convert to lowercase
-    const notes = readJSON(notesPath);
+    const keyword = keywordArg.slice(1).toLowerCase();
 
-    if (!notes[groupId]) {
-      notes[groupId] = {};
+    try {
+      // Simply call the new storage function
+      saveNote(groupId, keyword, noteText);
+      await sock.sendMessage(groupId, {
+        text: `✅ تم حفظ الملاحظة بنجاح بالكلمة المفتاحية: \`#${keyword}\``,
+      });
+    } catch (error) {
+      logger.error({ err: error, command: "save" }, "Error in !save command");
+      await sock.sendMessage(groupId, { text: "حدث خطأ أثناء حفظ الملاحظة." });
     }
-
-    notes[groupId][keyword] = noteText;
-    writeJSON(notesPath, notes);
-
-    await sock.sendMessage(groupId, {
-      text: `✅ تم حفظ الملاحظة بنجاح بالكلمة المفتاحية: \`#${keyword}\``,
-    });
   },
 };
