@@ -1,0 +1,45 @@
+{
+  "command_permissions": {
+    "ping": "MEMBERS",
+    "yt": "MEMBERS",
+    "gemini": "MEMBERS",
+    "qr": "MEMBERS",
+    "shortlink": "MEMBERS",
+    "schedule": "MEMBERS",
+    "tk": "MEMBERS",
+    "weather": "MEMBERS",
+    "prayer": "MEMBERS",
+    "tagadmins": "MEMBERS",
+
+    "shutdown": "OWNER_ONLY",
+
+    "status": "OWNER_ONLY",
+    "block": "OWNER_ONLY",
+    "unblock": "OWNER_ONLY",
+
+    "group": {
+      "default_permission": "ADMINS_OWNER",
+      "sub_commands": {
+        "approveall": "ADMINS_OWNER",
+        "setname": "ADMINS_OWNER",
+        "setpp": "ADMINS_OWNER",
+        "kick": "ADMINS_OWNER",
+        "add": "ADMINS_OWNER",
+        "promote": "ADMINS_OWNER",
+        "demote": "ADMINS_OWNER",
+        "removeall": "OWNER_ONLY",
+        "setrules": "ADMINS_ONLY",
+        "antilink": "ADMINS_ONLY",
+        "media": "ADMINS_ONLY",
+        "setwarn": "ADMINS_ONLY",
+        "rules": "MEMBERS",
+        "notes": "MEMBERS",
+        "members": "MEMBERS",
+        "tagadmins": "MEMBERS",
+        "welcome": "ADMINS_OWNER",
+        "blacklist": "ADMINS_OWNER",
+        "remove": "ADMINS_ONLY"
+      }
+    }
+  }
+}
