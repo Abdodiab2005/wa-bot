@@ -10,7 +10,7 @@
     "weather": "MEMBERS",
     "prayer": "MEMBERS",
     "tagadmins": "MEMBERS",
-
+    "restart": "OWNER_ONLY",
     "shutdown": "OWNER_ONLY",
 
     "status": "OWNER_ONLY",
