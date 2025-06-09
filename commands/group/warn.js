@@ -1,11 +1,11 @@
 // file: /commands/warn.js (Corrected Logic Flow)
-const { getGroupSettings } = require("../utils/storage.js"); // <-- 1. Import getGroupSettings
+const { getGroupSettings } = require("../../utils/storage.js"); // <-- 1. Import getGroupSettings
 const {
   getUserWarnings,
   saveUserWarnings,
   clearUserWarnings,
-} = require("../utils/storage.js");
-const logger = require("../utils/logger");
+} = require("../../utils/storage.js");
+const logger = require("../../utils/logger.js");
 
 module.exports = {
   name: "warn",

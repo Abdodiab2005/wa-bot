@@ -1,6 +1,6 @@
 // file: /commands/add.js (Upgraded with Invite Fallback)
-const logger = require("../utils/logger.js");
-const normalizeJid = require("../utils/normalizeJid");
+const logger = require("../../utils/logger.js");
+const normalizeJid = require("../../utils/normalizeJid.js");
 
 module.exports = {
   name: "add",

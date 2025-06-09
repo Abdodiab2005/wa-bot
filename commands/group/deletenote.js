@@ -1,5 +1,5 @@
 // file: /commands/deletenote.js
-const { readJSON, writeJSON } = require("../utils/storage.js");
+const { readJSON, writeJSON } = require("../../utils/storage.js");
 const notesPath = "./config/group_notes.json";
 
 module.exports = {

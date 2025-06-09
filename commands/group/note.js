@@ -1,6 +1,5 @@
 // file: /commands/note.js
-const { readJSON } = require("../utils/storage.js");
-const notesPath = "./config/group_notes.json";
+const { getAllNotes, getNote } = require("../../utils/storage.js");
 
 module.exports = {
   name: "note",
@@ -18,8 +17,8 @@ module.exports = {
     }
 
     const keyword = keywordArg.slice(1).toLowerCase();
-    const notes = readJSON(notesPath);
-    const noteText = notes[groupId]?.[keyword];
+    const notes = getAllNotes(groupId);
+    const noteText = getNote(groupId, keyword);
 
     if (noteText) {
       await sock.sendMessage(groupId, { text: noteText });

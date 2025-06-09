@@ -1,6 +1,6 @@
 // file: /commands/save.js (Refactored for SQLite)
-const { saveNote } = require("../utils/storage.js");
-const logger = require("../utils/logger");
+const { saveNote } = require("../../utils/storage.js");
+const logger = require("../../utils/logger.js");
 
 module.exports = {
   name: "save",

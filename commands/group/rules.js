@@ -1,7 +1,7 @@
 // file: /commands/rules.js
 const fs = require("fs");
 const settingsPath = "./config/group_settings.json";
-const logger = require("../utils/logger");
+const logger = require("../../utils/logger");
 
 // Helper function to read settings
 function getSettings() {

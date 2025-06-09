@@ -1,6 +1,6 @@
 // file: /commands/kick.js
-const logger = require("../utils/logger.js");
-const config = require("../config/config.json");
+const logger = require("../../utils/logger.js");
+const config = require("../../config/config.json");
 
 module.exports = {
   name: "kick",

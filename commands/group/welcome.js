@@ -1,6 +1,9 @@
 // file: /commands/welcome.js
-const { getGroupSettings, saveGroupSettings } = require("../utils/storage.js");
-const logger = require("../utils/logger");
+const {
+  getGroupSettings,
+  saveGroupSettings,
+} = require("../../utils/storage.js");
+const logger = require("../../utils/logger.js");
 
 module.exports = {
   name: "welcome",

@@ -1,5 +1,5 @@
 // file: /commands/all.js
-const logger = require("../utils/logger.js");
+const logger = require("../../utils/logger.js");
 
 module.exports = {
   name: "all",

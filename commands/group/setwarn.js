@@ -1,5 +1,5 @@
 // file: /commands/setwarn.js
-const { readJSON, writeJSON } = require("../utils/storage.js");
+const { readJSON, writeJSON } = require("../../utils/storage.js");
 const settingsPath = "./config/group_settings.json";
 
 module.exports = {

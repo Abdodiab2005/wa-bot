@@ -1,6 +1,5 @@
 // file: /commands/notes.js
-const { readJSON } = require("../utils/storage.js");
-const notesPath = "./config/group_notes.json";
+const { getAllNotes } = require("../utils/storage.js");
 
 module.exports = {
   name: "notes",
@@ -9,7 +8,7 @@ module.exports = {
 
   async execute(sock, msg) {
     const groupId = msg.key.remoteJid;
-    const notes = readJSON(notesPath);
+    const notes = getAllNotes(groupId);
     const groupNotes = notes[groupId] || {};
     const keywords = Object.keys(groupNotes);
 

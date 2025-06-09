@@ -1,6 +1,6 @@
 // file: /commands/warns.js (Corrected for SQLite)
-const { getUserWarnings } = require("../utils/storage.js");
-const logger = require("../utils/logger.js");
+const { getUserWarnings } = require("../../utils/storage.js");
+const logger = require("../../utils/logger.js");
 
 module.exports = {
   name: "warns",

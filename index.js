@@ -21,6 +21,7 @@ const { initializeScheduledJobs } = require("./scheduler.js");
 const normalizeJid = require("./utils/normalizeJid");
 const { executeRemoveAll, executeSendInvite } = require("./utils/executes");
 const { getGroupSettings } = require("./utils/storage.js");
+const { handleAntiSpam } = require("./utils/helper");
 
 let retryCount = 0;
 const MAX_RETRIES = 5; // أقصى عدد للمحاولات
@@ -28,6 +29,7 @@ const RETRY_DELAY_MS = 5000; // 5 ثوانٍ كبداية للتأخير
 
 // A map to hold pending command confirmations
 const confirmationSessions = new Map();
+const userMessageTimestamps = new Map();
 
 // Function to get user input from the console
 const rl = readline.createInterface({
@@ -371,22 +373,23 @@ async function connectToWhatsApp() {
         });
       }
     } else {
-      // --- This block handles REGULAR MESSAGES (for Anti-Link) ---
-      const { handleAntiLink } = require("./commands/antilink.js");
-      const { handleMediaControl } = require("./commands/media.js");
+      // --- If not a command, it's a regular message ---
+      // We call our handlers here
+      const { handleAntiLink } = require("./commands/group/antilink.js"); // Assuming this file exists
+      const { handleMediaControl } = require("./commands/group/media.js"); // Assuming this file exists
 
-      // We run media control first. If it deletes the message, we stop.
-      const mediaActionTaken = await handleMediaControl(
+      const linkActionTaken = await handleAntiLink(
         sock,
         msg,
         config,
         normalizeJid
       );
-
-      // If no media was deleted, then we check for links.
-      if (!mediaActionTaken) {
-        await handleAntiLink(sock, msg, config, normalizeJid);
+      if (!linkActionTaken) {
+        await handleMediaControl(sock, msg, config, normalizeJid);
       }
+
+      // ✅ --- NEW ANTI-SPAM HANDLER ---
+      handleAntiSpam(sock, msg); // We will create this function
     }
   });
 
@@ -442,6 +445,44 @@ async function connectToWhatsApp() {
         { err: error, update },
         "Error in group-participants.update event"
       );
+    }
+  });
+
+  sock.ev.on("group-requests.update", async (events) => {
+    // This event fires when a new user requests to join a group
+    logger.info({ events }, "Received group join request update");
+
+    for (const request of events) {
+      // We only care about new requests
+      if (request.type !== "request") continue;
+
+      const groupId = request.jid;
+      const participantId = request.from;
+
+      try {
+        const settings = getGroupSettings(groupId);
+
+        // Check if auto-approve is enabled for this group
+        if (settings?.join_requests?.auto_approve_enabled) {
+          logger.info(
+            `[Auto-Approve] Approving ${participantId} for group ${groupId}`
+          );
+
+          // Approve the join request
+          await sock.groupRequestUpdate(groupId, participantId, "approve");
+
+          // Optional: Send a notification to the group that the user was auto-approved
+          await delay(500); // Small delay
+          await sock.sendMessage(groupId, {
+            text: `✅ تم قبول طلب انضمام @${
+              participantId.split("@")[0]
+            } تلقائيًا.`,
+            mentions: [participantId],
+          });
+        }
+      } catch (error) {
+        logger.error({ err: error, request }, "Error in auto-approve event");
+      }
     }
   });
 }

@@ -1,5 +1,5 @@
 // file: /commands/removeall.js
-const logger = require("../utils/logger");
+const logger = require("../../utils/logger");
 
 module.exports = {
   name: "removeall",

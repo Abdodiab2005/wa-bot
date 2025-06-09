@@ -134,11 +134,25 @@ function deleteAllChatHistories() {
   const query = db.prepare("DELETE FROM ai_history");
   query.run();
 }
+function saveGroupSettings(groupId, settings) {
+  const allSettings = getAllSettings();
+  allSettings[groupId] = settings;
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(allSettings, null, 2));
+}
+
+function getAllSettings() {
+  if (!fs.existsSync(SETTINGS_FILE)) {
+    return {};
+  }
+  const data = fs.readFileSync(SETTINGS_FILE, "utf8");
+  return JSON.parse(data);
+}
 
 // We will add more functions here later for notes, warnings, etc.
 module.exports = {
   getGroupSettings,
   saveGroupSettings,
+  getAllSettings,
   getUserWarnings,
   saveUserWarnings,
   clearUserWarnings,

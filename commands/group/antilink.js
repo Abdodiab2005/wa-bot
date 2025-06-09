@@ -1,7 +1,7 @@
 // file: /commands/antilink.js
 const fs = require("fs");
 const settingsPath = "./config/group_settings.json";
-const logger = require("../utils/logger.js");
+const logger = require("../../utils/logger.js");
 
 // Helper function to read settings
 function getSettings() {

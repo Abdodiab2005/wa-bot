@@ -1,6 +1,6 @@
 // file: /commands/clearwarns.js (New/Corrected for SQLite)
-const { clearUserWarnings } = require("../utils/storage.js");
-const logger = require("../utils/logger.js");
+const { clearUserWarnings } = require("../../utils/storage.js");
+const logger = require("../../utils/logger.js");
 
 module.exports = {
   name: "clearwarns",

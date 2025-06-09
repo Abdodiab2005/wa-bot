@@ -1,5 +1,5 @@
 // file: /commands/promote.js
-const logger = require("../utils/logger.js");
+const logger = require("../../utils/logger.js");
 
 module.exports = {
   name: "promote",
