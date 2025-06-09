@@ -18,10 +18,13 @@ const NodeCache = require("node-cache"); // 1. استدعاء المكتبة
 const fs = require("fs"); // File System module to read files
 const config = require("./config/config.json"); // 1. تحميل ملف الإعدادات
 const { initializeScheduledJobs } = require("./scheduler.js");
-const normalizeJid = require("./utils/normalizeJid");
 const { executeRemoveAll, executeSendInvite } = require("./utils/executes");
 const { getGroupSettings } = require("./utils/storage.js");
 const { handleAntiSpam } = require("./utils/helper");
+
+// Read the owners string from .env, split it into an array, and trim any whitespace
+const ownerString = process.env.OWNERS_LIST || "";
+config.owners = ownerString.split(",").map((id) => id.trim());
 
 let retryCount = 0;
 const MAX_RETRIES = 5; // أقصى عدد للمحاولات
