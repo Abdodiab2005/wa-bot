@@ -21,6 +21,7 @@ const { initializeScheduledJobs } = require("./scheduler.js");
 const { executeRemoveAll, executeSendInvite } = require("./utils/executes");
 const { getGroupSettings } = require("./utils/storage.js");
 const { handleAntiSpam } = require("./utils/helper");
+const normalizeJid = require("./utils/normalizeJid.js");
 
 // Read the owners string from .env, split it into an array, and trim any whitespace
 const ownerString = process.env.OWNERS_LIST || "";
