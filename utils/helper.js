@@ -1,4 +1,6 @@
 // In index.js, this can be a new global helper function
+const normalizeJid = require("../utils/helper.js");
+
 async function handleAntiSpam(sock, msg) {
   const groupId = msg.key.remoteJid;
   if (!groupId.endsWith("@g.us")) return; // Only in groups
