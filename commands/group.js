@@ -31,35 +31,33 @@ for (const file of subCommandFiles) {
 module.exports = {
   name: "group",
   description: "Main command for all group management actions.",
-  chat: "group", // This command can only be used in groups
-  // We remove userAdminRequired from here to allow per-sub-command checks
+  chat: "group",
 
-  async execute(sock, msg, args, body, groupMetadata, confirmationSessions) {
+  async execute(sock, msg, args, body, groupMetadata) {
     const subCommandName = args.shift()?.toLowerCase();
 
     if (!subCommandName) {
-      // You can build a help menu for the !group command here
       return await sock.sendMessage(msg.key.remoteJid, {
-        text: "يرجى تحديد أمر فرعي بعد `!group` (مثل: kick, add, rules).",
+        text: "يرجى تحديد أمر فرعي بعد `!group` (مثل: kick, rules).",
       });
     }
 
     const subCommand = subCommands.get(subCommandName);
-
     if (!subCommand) {
       return await sock.sendMessage(msg.key.remoteJid, {
         text: `الأمر الفرعي \`${subCommandName}\` غير معروف.`,
       });
     }
 
-    // --- ✅ ADVANCED PERMISSION CHECKING MOVED HERE ---
+    // --- ✅ ALL PERMISSION LOGIC IS NOW HERE ---
     const senderId = normalizeJid(msg.key.participant);
     const isOwner = config.owners.includes(senderId);
+
     const isSenderAdmin = groupMetadata.participants.some(
       (p) => ["admin", "superadmin"].includes(p.admin) && p.id === senderId
     );
-
-    // Get permission level from config.json for the specific sub-command
+    console.log(`isOwner: ${isOwner}, isSenderAdmin: ${isSenderAdmin}`);
+    // Get permission level for the specific sub-command from config.json
     const groupPermissions = config.command_permissions.group;
     const permissionLevel =
       groupPermissions.sub_commands[subCommand.name] ||
@@ -69,52 +67,54 @@ module.exports = {
     switch (permissionLevel) {
       case "MEMBERS":
         hasPermission = true;
+        console.log(`Has permission: ${hasPermission} from members stats`);
         break;
       case "OWNER_ONLY":
         if (isOwner) hasPermission = true;
+        console.log(`Has permission: ${hasPermission} from owner stats`);
         break;
       case "ADMINS_ONLY":
         if (isSenderAdmin) hasPermission = true;
+        console.log(`Has permission: ${hasPermission} from admins stats`);
         break;
       case "ADMINS_OWNER":
         if (isOwner || isSenderAdmin) hasPermission = true;
+        console.log(`Has permission: ${hasPermission} from admins_owner stats`);
         break;
     }
 
     if (!hasPermission) {
+      console.log(`Current permission: ${hasPermission}`);
       return await sock.sendMessage(msg.key.remoteJid, {
-        text: "🚫 ليس لديك الصلاحية لاستخدام هذا الأمر.",
+        text: "🚫 ليس لديك الصلاحية لاستخدام هذا الأمر الفرعي.",
       });
     }
 
-    // Now, check execution prerequisites defined in the sub-command file itself
+    // Check execution prerequisites from the sub-command file itself
     const isBotAdmin = groupMetadata.participants.some(
       (p) =>
         ["admin", "superadmin"].includes(p.admin) &&
-        normalizeJid(p.id) === normalizeJid(sock.user.id)
+        normalizeJid(p.id) === normalizeJid(sock.user.lid)
     );
 
     if (subCommand.userAdminRequired && !isSenderAdmin) {
+      console.log(`isSenderAdmin: ${isSenderAdmin}`);
+      console.log(
+        `subCommand.userAdminRequired: ${subCommand.userAdminRequired}`
+      );
       return await sock.sendMessage(msg.key.remoteJid, {
-        text: "⚠️ هذا الأمر مخصص للمشرفين فقط.",
+        text: "⚠️ هذا الأمر يتطلب أن تكون مشرفًا.",
       });
     }
     if (subCommand.botAdminRequired && !isBotAdmin) {
       return await sock.sendMessage(msg.key.remoteJid, {
-        text: "⚠️ لا يمكنني تنفيذ هذا الأمر لأني لست مشرفًا.",
+        text: "⚠️ يجب أن أكون مشرفًا لتنفيذ هذا الأمر.",
       });
     }
 
     // --- All checks passed, execute the sub-command ---
     try {
-      await subCommand.execute(
-        sock,
-        msg,
-        args,
-        body,
-        groupMetadata,
-        confirmationSessions
-      );
+      await subCommand.execute(sock, msg, args, body, groupMetadata);
     } catch (error) {
       logger.error(
         { err: error, subCommand: subCommandName },

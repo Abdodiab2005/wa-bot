@@ -20,7 +20,6 @@ const config = require("./config/config.json"); // 1. تحميل ملف الإع
 const { initializeScheduledJobs } = require("./scheduler.js");
 const { executeRemoveAll, executeSendInvite } = require("./utils/executes");
 const { getGroupSettings } = require("./utils/storage.js");
-const { handleAntiSpam } = require("./utils/helper");
 const normalizeJid = require("./utils/normalizeJid.js");
 
 // Read the owners string from .env, split it into an array, and trim any whitespace
@@ -267,82 +266,57 @@ async function connectToWhatsApp() {
 
   // 4. Save Credentials on Update
   sock.ev.on("creds.update", saveCreds);
-
+  // The final and complete messages.upsert handler
   sock.ev.on("messages.upsert", async (m) => {
     const msg = m.messages[0];
-    // --- ✅ ADD THE BLACKLIST CHECK HERE ---
+
+    // --- 1. Blacklist Check (at the very top) ---
     if (msg.key.remoteJid.endsWith("@g.us")) {
-      // Only check in groups
       const groupId = msg.key.remoteJid;
-      const senderId = normalizeJid(msg.key.participant || msg.key.remoteJid);
-
-      // --- ✅ ADD THIS DEBUGGING BLOCK TEMPORARILY ---
-      console.log("\n--- OWNER CHECK DEBUG ---");
-      console.log(
-        `[1] Sender ID from WA: ${msg.key.participant || msg.key.remoteJid}`
-      );
-      console.log(`[2] Normalized Sender ID: ${senderId}`);
-      console.log(
-        `[3] Owners Array from Config: [${config.owners.join(", ")}]`
-      );
-      console.log(`[4] Is in Array? ${config.owners.includes(senderId)}`);
-      console.log("------------------------\n");
-      // --- END OF DEBUGGING BLOCK ---
-
-      const isGroup = msg.key.remoteJid.endsWith("@g.us");
-
+      const senderId = normalizeJid(msg.key.participant);
       try {
         const settings = getGroupSettings(groupId);
-        const isBlacklisted = settings?.blacklist?.includes(senderId);
-
-        if (isBlacklisted) {
-          // Before ignoring, make sure the sender is not an admin, so admins can still use the bot
+        if (settings?.blacklist?.includes(senderId)) {
           const groupMetadata = await sock.groupMetadata(groupId);
           const senderIsAdmin = groupMetadata.participants.find(
             (p) => p.id === senderId
           )?.admin;
-
           if (!senderIsAdmin) {
-            logger.info(
-              `Ignoring message from blacklisted user ${senderId} in group ${groupId}`
-            );
-            return; // Stop processing the message entirely
+            logger.info(`Ignoring message from blacklisted user ${senderId}`);
+            return;
           }
         }
       } catch (error) {
         logger.error({ err: error }, "Error during blacklist check");
       }
     }
-    // --- END OF BLACKLIST CHECK ---
-    if (!msg.message || msg.key.remoteJid === "status@broadcast") return;
+
+    // --- 2. Initial message filter ---
+    if (
+      !msg.message ||
+      msg.key.remoteJid === "status@broadcast" ||
+      msg.key.fromMe
+    )
+      return;
 
     const body =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text ||
-      msg.message.imageMessage?.caption ||
-      msg.message.videoMessage?.caption ||
-      "";
-    const senderId = msg.key.participant || msg.key.remoteJid;
+      msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+    const senderId = normalizeJid(msg.key.participant || msg.key.remoteJid);
 
+    // --- 3. Confirmation Handling ---
     if (confirmationSessions.has(senderId) && body.toLowerCase() === "yes") {
       const session = confirmationSessions.get(senderId);
-
-      // Make sure the person confirming is the one who initiated
       if (session.adminJid && session.adminJid !== senderId) return;
-
-      confirmationSessions.delete(senderId); // Use the confirmation once
-
-      if (session.command === "removeall") {
+      confirmationSessions.delete(senderId);
+      if (session.command === "removeall")
         await executeRemoveAll(sock, session);
-      } else if (session.command === "send_invite") {
-        // <-- ✅ The new part
+      else if (session.command === "send_invite")
         await executeSendInvite(sock, session);
-      }
       return;
     }
-    const prefix = "!";
 
-    // --- Main Logic: Check if it's a command or a regular message ---
+    // --- 4. Main Logic: Route to Command Handler OR Regular Message Handlers ---
+    const prefix = "!";
     if (body.startsWith(prefix)) {
       // --- This block handles COMMANDS ---
       const args = body.slice(prefix.length).trim().split(/ +/);
@@ -354,112 +328,45 @@ async function connectToWhatsApp() {
       if (command.chat === "group" && !isGroup) return;
       if (command.chat === "private" && isGroup) return;
 
-      const groupMetadata = isGroup
-        ? await sock.groupMetadata(msg.key.remoteJid)
-        : null;
-
-      const isOwner =
-        config.owners.includes(normalizeJid(senderId)) ||
-        (msg.key.fromMe && body?.startsWith(prefix));
-      const isSenderAdmin =
-        isGroup &&
-        groupMetadata.participants.some(
-          (p) =>
-            ["admin", "superadmin"].includes(p.admin) &&
-            normalizeJid(p.id) === normalizeJid(senderId)
-        );
-
-      // --- ✅ THE FINAL FIX IS HERE ---
-      const isBotAdmin =
-        isGroup &&
-        groupMetadata.participants.some(
-          (p) =>
-            ["admin", "superadmin"].includes(p.admin) &&
-            normalizeJid(p.id) === normalizeJid(sock.user.lid)
-        );
-
-      const permissionLevel =
-        config.command_permissions[commandName] || "MEMBERS";
-      let hasPermission = false;
-      switch (permissionLevel) {
-        case "MEMBERS":
-          hasPermission = true;
-          break;
-        case "OWNER_ONLY":
-          if (isOwner) hasPermission = true;
-          break;
-        case "ADMINS_ONLY":
-          if (isSenderAdmin) hasPermission = true;
-          break;
-        case "ADMINS_OWNER":
-          if (isOwner || isSenderAdmin) hasPermission = true;
-          break;
-      }
-
-      if (!hasPermission)
-        return await sock.sendMessage(msg.key.remoteJid, {
-          text: "🚫 ليس لديك الصلاحية لاستخدام هذا الأمر.",
-        });
-      if (command.botAdminRequired && !isBotAdmin)
-        return await sock.sendMessage(msg.key.remoteJid, {
-          text: "⚠️ لا يمكنني تنفيذ هذا الأمر لأني لست مشرفًا في هذا الجروب.",
-        });
-
-      console.log(`[Commands] Executing command: ${commandName}`);
       try {
-        await command.execute(
-          sock,
-          msg,
-          args,
-          body,
-          groupMetadata,
-          confirmationSessions
-        );
+        const groupMetadata = isGroup
+          ? await sock.groupMetadata(msg.key.remoteJid)
+          : null;
+        await command.execute(sock, msg, args, body, groupMetadata);
       } catch (error) {
-        // --- RESPECTABLE DEBUGGING BLOCK ---
-        console.log("\n--- !!! UNHANDLED COMMAND ERROR CAUGHT !!! ---");
-        // Log basic, safe properties first
-        console.log(`[ERROR NAME]: ${error.name}`);
-        console.log(`[ERROR MESSAGE]: ${error.message}`);
-        // Log the stack trace for context
-        console.log(`[ERROR STACK]:\n${error.stack}`);
-        console.log("--- END OF DEBUG ---");
-
-        // Use the logger with a clean, safe object
         logger.error(
-          {
-            command: commandName,
-            error: {
-              name: error.name,
-              message: error.message,
-              stack: error.stack,
-            },
-          },
-          `An error occurred in command: ${commandName}`
+          { err: error, command: commandName },
+          "Error executing command"
         );
-
-        await sock.sendMessage(msg.key.remoteJid, {
-          text: `حدث خطأ فني أثناء تنفيذ الأمر: ${commandName}`,
-        });
+        await sock.sendMessage(msg.key.remoteJid, { text: `حدث خطأ فني.` });
       }
     } else {
-      // --- If not a command, it's a regular message ---
-      // We call our handlers here
-      const { handleAntiLink } = require("./commands/group/antilink.js"); // Assuming this file exists
-      const { handleMediaControl } = require("./commands/group/media.js"); // Assuming this file exists
+      // --- This block handles REGULAR MESSAGES (for antilink, antispam, etc.) ---
+      const isGroup = msg.key.remoteJid.endsWith("@g.us");
+      if (isGroup) {
+        // We call all our moderation handlers for regular messages here
+        const { handleAntiLink } = require("./commands/group/antilink.js");
+        const { handleMediaControl } = require("./commands/group/media.js");
+        // handleAntiSpam is a global function in index.js
 
-      const linkActionTaken = await handleAntiLink(
-        sock,
-        msg,
-        config,
-        normalizeJid
-      );
-      if (!linkActionTaken) {
-        await handleMediaControl(sock, msg, config, normalizeJid);
+        const linkActionTaken = await handleAntiLink(
+          sock,
+          msg,
+          config,
+          normalizeJid
+        );
+        if (!linkActionTaken) {
+          const mediaActionTaken = await handleMediaControl(
+            sock,
+            msg,
+            config,
+            normalizeJid
+          );
+          if (!mediaActionTaken) {
+            await handleAntiSpam(sock, msg);
+          }
+        }
       }
-
-      // ✅ --- NEW ANTI-SPAM HANDLER ---
-      handleAntiSpam(sock, msg); // We will create this function
     }
   });
 
