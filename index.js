@@ -73,6 +73,13 @@ const tgBot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
   });
 })();
 
+const CHANNEL_MAP = {};
+
+process.env.CHANNELS.split(",").forEach((entry) => {
+  const [wa, tg] = entry.split(":");
+  if (wa && tg) CHANNEL_MAP[wa] = tg;
+});
+
 // Prepare retry logic
 let retryCount = 0;
 const MAX_RETRIES = 5; // أقصى عدد للمحاولات
@@ -291,7 +298,12 @@ async function connectToWhatsApp() {
     const msg = m.messages[0];
 
     // Handle channels messages
-    if (msg.key.remoteJid.endsWith("@newsletter")) {
+    if (
+      msg.key.remoteJid.endsWith("@newsletter") &&
+      CHANNEL_MAP[msg.key.remoteJid]
+    ) {
+      const telegramChannel = CHANNEL_MAP[msg.key.remoteJid];
+
       if (!msg.message) {
         logger.info(`[🗑️] Possibly deleted message: ${msg.key.id}`);
         const deleted = await getTelegramMsgByWhatsappId(msg.key.id);
@@ -312,7 +324,7 @@ async function connectToWhatsApp() {
             );
           }
         }
-        return;
+        return; // ⛔ لازم توقف هنا لو الرسالة محذوفة
       }
 
       // Try to send message to telegram
@@ -413,7 +425,8 @@ async function connectToWhatsApp() {
     if (
       msg.key.id &&
       !msg.key.remoteJid.endsWith("@newsletter") &&
-      !msg.key.fromMe
+      !msg.key.fromMe &&
+      CHANNEL_MAP[msg.key.remoteJid]
     ) {
       let mediaPath = null;
 

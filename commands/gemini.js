@@ -14,7 +14,7 @@ const API_KEY = process.env.GEMINI_API_KEY;
 if (!API_KEY) logger.error("GEMINI_API_KEY is not defined!");
 
 const genAI = new GoogleGenerativeAI(API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 module.exports = {
   name: "gemini",
