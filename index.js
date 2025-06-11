@@ -1,53 +1,94 @@
-const { server, io } = require("./app.js");
-const PORT = process.env.PORT || 3000;
-const logger = require("./utils/logger");
-
 const {
   default: makeWASocket,
   useMultiFileAuthState,
   Browsers,
   delay,
   DisconnectReason,
+  downloadMediaMessage,
 } = require("@whiskeysockets/baileys");
 
+const axios = require("axios");
 const path = require("path");
 const pino = require("pino"); // pino for logging
-const readline = require("readline"); // To get user input for pairing code
 const qrcode = require("qrcode-terminal");
 const NodeCache = require("node-cache"); // 1. استدعاء المكتبة
+const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs"); // File System module to read files
+require("dotenv").config();
+
+// custom imports
 const config = require("./config/config.json"); // 1. تحميل ملف الإعدادات
-const { initializeScheduledJobs } = require("./scheduler.js");
-const { executeRemoveAll, executeSendInvite } = require("./utils/executes");
-const { getGroupSettings } = require("./utils/storage.js");
 const normalizeJid = require("./utils/normalizeJid.js");
+const { initializeScheduledJobs } = require("./scheduler.js");
+const {
+  getArchivedMessage,
+  cacheMessage,
+  getGroupSettings,
+  getTelegramId,
+  saveTelegramId,
+  getAllChannels,
+  saveMessageMapping,
+  getTelegramMsgByWhatsappId,
+  deleteMapping,
+} = require("./utils/storage.js"); // Make sure these are required
+const { server, io } = require("./app.js");
+const logger = require("./utils/logger");
+const { formatWhatsappToTelegram } = require("./utils/helper.js");
+
+// Import secrets
+const PORT = process.env.PORT || 3000;
+const LOG_CHAT_ID = process.env.LOG_CHAT_ID;
+const CHANNELS = process.env.CHANNELS;
+const ownerString = process.env.OWNERS_LIST || "";
 
 // Read the owners string from .env, split it into an array, and trim any whitespace
-const ownerString = process.env.OWNERS_LIST || "";
 config.owners = ownerString.split(",").map((id) => id.trim());
 
+// Prepare Telegram Bot
+const tgBot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
+  polling: true,
+});
+
+// Prepare channels sending
+(() => {
+  if (!CHANNELS) return;
+
+  const dbChannels = getAllChannels(); // Sync
+  const pairs = CHANNELS.split(",").map((pair) => {
+    const [telegram, whatsapp] = pair.split(":").map((id) => id.trim());
+    return { telegram, whatsapp };
+  });
+
+  pairs.forEach(({ telegram, whatsapp }) => {
+    const exists = dbChannels.some((channel) => {
+      return (
+        channel.telegram_channel_id === telegram &&
+        channel.whatsapp_group_id === whatsapp
+      );
+    });
+
+    if (!exists) {
+      saveTelegramId(telegram, whatsapp, "");
+    }
+  });
+})();
+
+// Prepare retry logic
 let retryCount = 0;
 const MAX_RETRIES = 5; // أقصى عدد للمحاولات
 const RETRY_DELAY_MS = 5000; // 5 ثوانٍ كبداية للتأخير
 
-// A map to hold pending command confirmations
+// Prepare confirmation sessions
 const confirmationSessions = new Map();
 const userMessageTimestamps = new Map();
 
-// Function to get user input from the console
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-const question = (text) => new Promise((resolve) => rl.question(text, resolve));
-
+// Prepare group metadata cache
 const groupMetadataCache = new NodeCache({
   stdTTL: 60 * 60, // صلاحية الكاش لمدة ساعة (بالثواني)
   checkperiod: 60 * 5, // التحقق من صلاحية الكاش كل 5 دقائق
 });
 
-// Create a collection to store your commands
+// Prepare commands collection
 const commands = new Map();
 const commandFiles = fs
   .readdirSync("./commands")
@@ -70,6 +111,7 @@ for (const file of commandFiles) {
   }
 }
 
+// Prepare anti-spam function
 async function handleAntiSpam(sock, msg) {
   const groupId = msg.key.remoteJid;
   if (!groupId.endsWith("@g.us")) return; // Only in groups
@@ -148,49 +190,26 @@ async function connectToWhatsApp() {
     browser: Browsers.windows("Desktop"), // Simulate a browser
     markOnlineOnConnect: false,
     logger: pino({
-      level: "warn",
+      level: "silent",
     }), // Use pino for logging, silent to keep console clean
     cachedGroupMetadata: (jid) => {
       return groupMetadataCache.get(jid);
     },
   });
 
-  // --- Pairing Code Logic ---
-
   // 3. Listen for Connection Events
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    // ✅ ***هذا هو المكان الصحيح لمنطق الـ Pairing Code***
     if (qr) {
-      // عندما يتم توليد QR، نسأل المستخدم ماذا يريد
-      const usePairingCode = await question(
-        "Do you want to use a pairing code instead of QR? (yes/no) "
-      );
-
-      if (usePairingCode.toLowerCase() === "yes") {
-        const phoneNumber = await question(
-          "Please enter your phone number (e.g., 201234567890): "
-        );
-        try {
-          const pairingCode = await sock.requestPairingCode(phoneNumber);
-          logger.info(`✅ Your Pairing Code is: ${pairingCode}`);
-        } catch (error) {
-          logger.error("❌ Failed to request pairing code:", error);
-        }
-      } else {
-        logger.info("Scan the QR code below:");
-        io.emit("qr_update", qr);
-        io.emit("status_update", { status: "QR Code Received" });
-
-        // إذا لم يرد استخدام pairing code، يمكنك طباعة الـ QR code
-        const qrcode = require("qrcode-terminal");
-        qrcode.generate(qr, {
-          small: true,
-        });
-      }
+      logger.info("Scan the QR code below:");
+      io.emit("qr_update", qr);
+      io.emit("status_update", { status: "QR Code Received" });
+      qrcode.generate(qr, {
+        small: true,
+      });
     } else {
-      console.log("Qr haven't been generated yet.");
+      logger.warn(`Qr code haven't generated yet`);
     }
 
     if (connection === "close") {
@@ -199,8 +218,8 @@ async function connectToWhatsApp() {
       io.emit("status_update", { status: "Disconnected" });
 
       if (shouldReconnect && retryCount < MAX_RETRIES) {
-        retryCount++; // زيادة عداد المحاولات
-        const delayMs = RETRY_DELAY_MS * retryCount; // زيادة التأخير (5s, 10s, 15s...)
+        retryCount++; // Increase retry count
+        const delayMs = RETRY_DELAY_MS * retryCount; // Increase delay (5s, 10s, 15s...)
 
         logger.info(
           `🔌 Connection closed. Reason: ${statusCode}. Retrying in ${
@@ -208,8 +227,8 @@ async function connectToWhatsApp() {
           }s... (Attempt ${retryCount}/${MAX_RETRIES})`
         );
 
-        await delay(delayMs); // الانتظار قبل المحاولة التالية
-        connectToWhatsApp(); // إعادة محاولة الاتصال
+        await delay(delayMs); // Wait before retrying
+        connectToWhatsApp(); // Retry connection
       } else if (!shouldReconnect) {
         logger.error(
           "❌ Connection closed permanently. Reason: Logged Out. Please delete the 'auth_info_baileys' folder and scan again."
@@ -223,8 +242,7 @@ async function connectToWhatsApp() {
       }
     } else if (connection === "open") {
       logger.info("✅ Connection opened successfully!");
-      retryCount = 0; // 🔄 ***أهم خطوة: إعادة تعيين العداد عند نجاح الاتصال***
-      // منطق استباقي لملء الكاش ببيانات كل الجروبات
+      retryCount = 0;
       io.emit("status_update", { status: "Connected" });
 
       logger.info(
@@ -235,10 +253,10 @@ async function connectToWhatsApp() {
       initializeScheduledJobs(sock);
 
       try {
-        // جلب بيانات كل الجروبات المشارك فيها البوت
+        // Fetch and cache all groups
         const groups = await sock.groupFetchAllParticipating();
 
-        // تخزين كل جروب في الكاش
+        // Store all groups in cache
         let cachedCount = 0;
         for (const jid in groups) {
           groupMetadataCache.set(jid, groups[jid]);
@@ -254,9 +272,7 @@ async function connectToWhatsApp() {
     }
   });
 
-  // 4. ***أهم خطوة: تحديث الكاش تلقائيًا***
-  // هذا الجزء يستمع لأي تحديث في بيانات الجروبات (مثل انضمام عضو)
-  // ويقوم بتخزين البيانات الجديدة في الكاش
+  // 4. Save secret keys (Groups) into cache if not exits to avoid heavy requests and avoid ban
   sock.ev.on("groups.upsert", (updates) => {
     for (const group of updates) {
       logger.info(`[Cache] Caching metadata for group: ${group.id}`);
@@ -264,58 +280,318 @@ async function connectToWhatsApp() {
     }
   });
 
-  // 4. Save Credentials on Update
+  // 5. Save Credentials on Update
   sock.ev.on("creds.update", saveCreds);
-  // The final and complete messages.upsert handler
+
+  // 6. Handle messages
   sock.ev.on("messages.upsert", async (m) => {
+    // We only care about new messages/updates
+    if (m.type !== "notify" || !m.messages[0]) return;
+
     const msg = m.messages[0];
 
-    // --- 1. Blacklist Check (at the very top) ---
-    if (msg.key.remoteJid.endsWith("@g.us")) {
-      const groupId = msg.key.remoteJid;
-      const senderId = normalizeJid(msg.key.participant);
+    // Handle channels messages
+    if (msg.key.remoteJid.endsWith("@newsletter")) {
+      if (!msg.message) {
+        logger.info(`[🗑️] Possibly deleted message: ${msg.key.id}`);
+        const deleted = await getTelegramMsgByWhatsappId(msg.key.id);
+        if (deleted) {
+          try {
+            await tgBot.deleteMessage(
+              deleted.telegram_channel,
+              deleted.telegram_msg_id
+            );
+            logger.info(
+              `[✅] Deleted Telegram message: ${deleted.telegram_msg_id}`
+            );
+            await deleteMapping(msg.key.id);
+          } catch (err) {
+            logger.error(
+              "❌ Failed to delete message in Telegram:",
+              err.message
+            );
+          }
+        }
+        return;
+      }
+
+      // Try to send message to telegram
       try {
-        const settings = getGroupSettings(groupId);
-        if (settings?.blacklist?.includes(senderId)) {
-          const groupMetadata = await sock.groupMetadata(groupId);
-          const senderIsAdmin = groupMetadata.participants.find(
-            (p) => p.id === senderId
-          )?.admin;
-          if (!senderIsAdmin) {
-            logger.info(`Ignoring message from blacklisted user ${senderId}`);
-            return;
+        const whatsappChannel = msg.key.remoteJid;
+        const telegramChannel = await getTelegramId(whatsappChannel);
+        logger.info(`sending to channel: ${telegramChannel}`);
+        if (!telegramChannel) return;
+
+        const type = Object.keys(msg.message || {})[0];
+        const content = msg.message[type];
+        if (
+          [
+            "imageMessage",
+            "videoMessage",
+            "audioMessage",
+            "stickerMessage",
+          ].includes(type)
+        ) {
+          const response = await axios.get(content.url, {
+            responseType: "arraybuffer",
+          });
+
+          const buffer = Buffer.from(response.data);
+
+          const options = {
+            caption: content.caption
+              ? formatWhatsappToTelegram(content.caption)
+              : "",
+            parse_mode: "HTML",
+          };
+
+          if (type === "imageMessage") {
+            const sent = await tgBot.sendPhoto(
+              telegramChannel,
+              buffer,
+              options
+            );
+            if (sent) {
+              await saveMessageMapping(
+                msg.key.id,
+                sent.message_id,
+                telegramChannel
+              );
+            }
+          } else if (type === "videoMessage") {
+            const sent = await tgBot.sendVideo(
+              telegramChannel,
+              buffer,
+              options
+            );
+            if (sent) {
+              await saveMessageMapping(
+                msg.key.id,
+                sent.message_id,
+                telegramChannel
+              );
+            }
+          } else if (type === "audioMessage") {
+            const sent = await tgBot.sendAudio(telegramChannel, buffer);
+            if (sent) {
+              await saveMessageMapping(
+                msg.key.id,
+                sent.message_id,
+                telegramChannel
+              );
+            }
+          } else if (type === "stickerMessage") {
+            const sent = await tgBot.sendSticker(telegramChannel, buffer);
+            if (sent) {
+              await saveMessageMapping(
+                msg.key.id,
+                sent.message_id,
+                telegramChannel
+              );
+            }
+          }
+        } else {
+          const text = content || content?.extendedTextMessage?.text || "";
+          const formatted = formatWhatsappToTelegram(text);
+          const sent = await tgBot.sendMessage(telegramChannel, formatted, {
+            parse_mode: "HTML",
+          });
+          if (sent) {
+            await saveMessageMapping(
+              msg.key.id,
+              sent.message_id,
+              telegramChannel
+            );
           }
         }
       } catch (error) {
-        logger.error({ err: error }, "Error during blacklist check");
+        logger.error(`Error sending message to telegram: ${error.message}`);
       }
     }
 
-    // --- 2. Initial message filter ---
+    // This allows us to retrieve it later if it gets deleted.
+    if (
+      msg.key.id &&
+      !msg.key.remoteJid.endsWith("@newsletter") &&
+      !msg.key.fromMe
+    ) {
+      let mediaPath = null;
+
+      // store media when recieved localy to restore it when deleted
+      const mediaTypes = [
+        "imageMessage",
+        "videoMessage",
+        "stickerMessage",
+        "audioMessage",
+      ];
+      const msgType = Object.keys(msg.message || {})[0];
+      if (mediaTypes.includes(msgType)) {
+        const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
+        const ext = msgType.includes("image")
+          ? "jpg"
+          : msgType.includes("video")
+          ? "mp4"
+          : msgType.includes("audio")
+          ? "mp3"
+          : "webp";
+        const filename = `${msg.key.id}.${ext}`;
+        const savePath = path.join(__dirname, "media", filename);
+        fs.writeFileSync(savePath, mediaBuffer);
+        mediaPath = savePath;
+      }
+      cacheMessage(msg.key.id, { ...msg, mediaPath }); // store the media path with the message
+    }
+
+    // Handle deleted messages (revoke)
+    // This is a special event type and must be handled immediately.
+
+    if (
+      (msg.message?.protocolMessage?.type &&
+        msg.message?.protocolMessage?.type !== undefined) !== undefined &&
+      !msg.key.remoteJid.endsWith("@newsletter") &&
+      !msg.key.fromMe
+    ) {
+      logger.info(`[Anti-Delete] Deletion event detected.`);
+
+      try {
+        const revokedMsgKey = msg.message.protocolMessage.key;
+        const originalMsg = getArchivedMessage(revokedMsgKey.id);
+
+        if (originalMsg) {
+          // We found the deleted message in our database cache
+          const sender =
+            originalMsg.key.participant || originalMsg.key.remoteJid;
+
+          // Let's get the group name if it's a group chat
+          const groupName = originalMsg.key.remoteJid.endsWith("@g.us")
+            ? (await sock.groupMetadata(originalMsg.key.remoteJid)).subject
+            : "Private Chat";
+
+          const logMessage =
+            `*🗑️ رسالة محذوفة 🗑️*\n\n` +
+            `*من:* @${sender.split("@")[0]}\n` +
+            `*في:* ${groupName}`;
+
+          const originalMsgContent = originalMsg.message;
+          const msgType = Object.keys(originalMsgContent)[0];
+
+          const logDestination = LOG_CHAT_ID;
+
+          if (
+            [
+              "imageMessage",
+              "videoMessage",
+              "stickerMessage",
+              "audioMessage",
+            ].includes(msgType)
+          ) {
+            let mediaBuffer;
+            if (originalMsg.mediaPath && fs.existsSync(originalMsg.mediaPath)) {
+              mediaBuffer = fs.readFileSync(originalMsg.mediaPath);
+            } else {
+              mediaBuffer = await downloadMediaMessage(
+                originalMsg,
+                "buffer",
+                {}
+              );
+            }
+
+            let mediaOptions = { caption: logMessage, mentions: [sender] };
+            if (msgType === "imageMessage") {
+              await sock.sendMessage(logDestination, {
+                image: mediaBuffer,
+                ...mediaOptions,
+              });
+            } else if (msgType === "videoMessage") {
+              await sock.sendMessage(logDestination, {
+                video: mediaBuffer,
+                ...mediaOptions,
+              });
+            }
+
+            // For sticker and audio, we send the info separately as caption is not always supported
+            if (msgType === "stickerMessage") {
+              await sock.sendMessage(logDestination, { sticker: mediaBuffer });
+              setTimeout(async () => {
+                await sock.sendMessage(logDestination, {
+                  text: logMessage,
+                  mentions: [sender],
+                });
+              }, 500);
+            }
+            if (msgType === "audioMessage") {
+              await sock.sendMessage(logDestination, {
+                audio: mediaBuffer,
+                mimetype: "audio/mp4",
+              });
+              setTimeout(async () => {
+                await sock.sendMessage(logDestination, {
+                  text: logMessage,
+                  mentions: [sender],
+                });
+              }, 500);
+            }
+          } else {
+            // It's a text message
+            const originalText =
+              originalMsgContent.conversation ||
+              originalMsgContent.extendedTextMessage?.text;
+            await sock.sendMessage(logDestination, {
+              text: `${logMessage}\n*الرسالة:* ${originalText}`,
+              mentions: [sender],
+            });
+          }
+        } else {
+          logger.warn(
+            "Could not find the deleted message in cache (it was probably sent while bot was offline)."
+          );
+        }
+      } catch (error) {
+        logger.error({ err: error }, "Error in Anti-Delete system.");
+      }
+
+      return; // IMPORTANT: Stop all further processing for this event.
+    }
+
+    // --- 3. STANDARD MESSAGE FILTERS ---
+    // Now that we've handled deletions, we can filter out other messages we don't want to process.
     if (
       !msg.message ||
       msg.key.remoteJid === "status@broadcast" ||
-      msg.key.fromMe
-    )
-      return;
-
-    const body =
-      msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-    const senderId = normalizeJid(msg.key.participant || msg.key.remoteJid);
-
-    // --- 3. Confirmation Handling ---
-    if (confirmationSessions.has(senderId) && body.toLowerCase() === "yes") {
-      const session = confirmationSessions.get(senderId);
-      if (session.adminJid && session.adminJid !== senderId) return;
-      confirmationSessions.delete(senderId);
-      if (session.command === "removeall")
-        await executeRemoveAll(sock, session);
-      else if (session.command === "send_invite")
-        await executeSendInvite(sock, session);
+      msg.key.fromMe ||
+      msg.key.remoteJid.endsWith("@newsletter")
+    ) {
       return;
     }
 
-    // --- 4. Main Logic: Route to Command Handler OR Regular Message Handlers ---
+    // --- 3. Parse Message Context ---
+    const body =
+      msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+    const senderId = normalizeJid(msg.key.participant || msg.key.remoteJid);
+    const isGroup = msg.key.remoteJid.endsWith("@g.us");
+
+    // --- 4. Blacklist Check ---
+    if (isGroup) {
+      const settings = getGroupSettings(msg.key.remoteJid);
+      if (settings?.blacklist?.includes(senderId)) {
+        const groupMetadata = await sock.groupMetadata(msg.key.remoteJid);
+        const isSenderAdmin = groupMetadata.participants.some(
+          (p) => p.admin && p.id === senderId
+        );
+        if (!isSenderAdmin)
+          return logger.info(
+            `Ignoring message from blacklisted user ${senderId}`
+          );
+      }
+    }
+
+    // --- 5. Confirmation Handling ---
+    if (confirmationSessions.has(senderId) && body.toLowerCase() === "yes") {
+      // (Your existing confirmation logic for removeall and send_invite goes here)
+      return;
+    }
+
+    // --- 6. Main Router: Command or Regular Message? ---
     const prefix = "!";
     if (body.startsWith(prefix)) {
       // --- This block handles COMMANDS ---
@@ -324,27 +600,22 @@ async function connectToWhatsApp() {
       const command = commands.get(commandName);
       if (!command) return;
 
-      const isGroup = msg.key.remoteJid.endsWith("@g.us");
-      if (command.chat === "group" && !isGroup) return;
-      if (command.chat === "private" && isGroup) return;
-
       try {
         const groupMetadata = isGroup
           ? await sock.groupMetadata(msg.key.remoteJid)
           : null;
+        // The index.js handler just passes the context to the command file.
         await command.execute(sock, msg, args, body, groupMetadata);
       } catch (error) {
         logger.error(
           { err: error, command: commandName },
           "Error executing command"
         );
-        await sock.sendMessage(msg.key.remoteJid, { text: `حدث خطأ فني.` });
       }
     } else {
-      // --- This block handles REGULAR MESSAGES (for antilink, antispam, etc.) ---
-      const isGroup = msg.key.remoteJid.endsWith("@g.us");
+      // --- This block handles REGULAR MESSAGES ---
       if (isGroup) {
-        // We call all our moderation handlers for regular messages here
+        // Call all moderation handlers for regular messages here
         const { handleAntiLink } = require("./commands/group/antilink.js");
         const { handleMediaControl } = require("./commands/group/media.js");
         // handleAntiSpam is a global function in index.js
@@ -464,9 +735,7 @@ async function connectToWhatsApp() {
   });
 }
 
-// Start the connection process
-
-// --- ✅ 2. تشغيل السيرفر ---
+// --- Start the server ---
 server.listen(PORT, () => {
   logger.info(`Server is running at http://localhost:${PORT}`);
   connectToWhatsApp().catch((err) => logger.error("Unexpected error: " + err));

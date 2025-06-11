@@ -38,7 +38,7 @@ module.exports = {
 
     if (!subCommandName) {
       return await sock.sendMessage(msg.key.remoteJid, {
-        text: "يرجى تحديد أمر فرعي بعد `!group` (مثل: kick, rules).",
+        text: "يرجى تحديد أمر فرعي بعد `!group`.",
       });
     }
 
@@ -49,15 +49,13 @@ module.exports = {
       });
     }
 
-    // --- ✅ ALL PERMISSION LOGIC IS NOW HERE ---
+    // --- ALL PERMISSION & PREREQUISITE LOGIC LIVES HERE ---
     const senderId = normalizeJid(msg.key.participant);
     const isOwner = config.owners.includes(senderId);
-
     const isSenderAdmin = groupMetadata.participants.some(
       (p) => ["admin", "superadmin"].includes(p.admin) && p.id === senderId
     );
-    console.log(`isOwner: ${isOwner}, isSenderAdmin: ${isSenderAdmin}`);
-    // Get permission level for the specific sub-command from config.json
+
     const groupPermissions = config.command_permissions.group;
     const permissionLevel =
       groupPermissions.sub_commands[subCommand.name] ||
@@ -67,52 +65,38 @@ module.exports = {
     switch (permissionLevel) {
       case "MEMBERS":
         hasPermission = true;
-        console.log(`Has permission: ${hasPermission} from members stats`);
         break;
       case "OWNER_ONLY":
         if (isOwner) hasPermission = true;
-        console.log(`Has permission: ${hasPermission} from owner stats`);
         break;
       case "ADMINS_ONLY":
         if (isSenderAdmin) hasPermission = true;
-        console.log(`Has permission: ${hasPermission} from admins stats`);
         break;
       case "ADMINS_OWNER":
         if (isOwner || isSenderAdmin) hasPermission = true;
-        console.log(`Has permission: ${hasPermission} from admins_owner stats`);
         break;
     }
 
-    if (!hasPermission) {
-      console.log(`Current permission: ${hasPermission}`);
+    if (!hasPermission)
       return await sock.sendMessage(msg.key.remoteJid, {
-        text: "🚫 ليس لديك الصلاحية لاستخدام هذا الأمر الفرعي.",
+        text: "🚫 ليس لديك الصلاحية لاستخدام هذا الأمر.",
       });
-    }
 
-    // Check execution prerequisites from the sub-command file itself
+    // Check prerequisites from the sub-command file itself
     const isBotAdmin = groupMetadata.participants.some(
       (p) =>
         ["admin", "superadmin"].includes(p.admin) &&
-        normalizeJid(p.id) === normalizeJid(sock.user.lid)
+        normalizeJid(p.id) === normalizeJid(sock.user.id)
     );
-
-    if (subCommand.userAdminRequired && !isSenderAdmin) {
-      console.log(`isSenderAdmin: ${isSenderAdmin}`);
-      console.log(
-        `subCommand.userAdminRequired: ${subCommand.userAdminRequired}`
-      );
+    if (subCommand.userAdminRequired && !isSenderAdmin)
       return await sock.sendMessage(msg.key.remoteJid, {
         text: "⚠️ هذا الأمر يتطلب أن تكون مشرفًا.",
       });
-    }
-    if (subCommand.botAdminRequired && !isBotAdmin) {
+    if (subCommand.botAdminRequired && !isBotAdmin)
       return await sock.sendMessage(msg.key.remoteJid, {
         text: "⚠️ يجب أن أكون مشرفًا لتنفيذ هذا الأمر.",
       });
-    }
 
-    // --- All checks passed, execute the sub-command ---
     try {
       await subCommand.execute(sock, msg, args, body, groupMetadata);
     } catch (error) {

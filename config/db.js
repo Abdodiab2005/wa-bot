@@ -58,6 +58,35 @@ function initializeDatabase() {
 
   db.exec(createAiHistoryTable);
   logger.info("Table 'ai_history' is ready.");
+
+  const createMessageCacheTable = `
+CREATE TABLE IF NOT EXISTS message_cache (
+    message_id TEXT PRIMARY KEY,
+    message_data TEXT NOT NULL,
+    timestamp INTEGER NOT NULL
+);`;
+  db.exec(createMessageCacheTable);
+  logger.info("Table 'message_cache' is ready.");
+
+  // db.exec(`DELETE FROM telegram_whatsapp_channels`);
+
+  const createTelegramWhatsappChannelsTable = `
+CREATE TABLE IF NOT EXISTS telegram_whatsapp_channels (
+    telegram_channel_id TEXT PRIMARY KEY,
+    whatsapp_group_id TEXT NOT NULL,
+    last_message_id TEXT
+);`;
+  db.exec(createTelegramWhatsappChannelsTable);
+  logger.info("Table 'telegram_whatsapp_channels' is ready.");
+
+  const createTG_WA_MessagesTable = `  
+CREATE TABLE IF NOT EXISTS whatsapp_telegram_messages (
+    whatsapp_msg_id TEXT PRIMARY KEY,
+    telegram_msg_id INTEGER NOT NULL,
+    telegram_channel TEXT NOT NULL
+  )`;
+  db.exec(createTG_WA_MessagesTable);
+  logger.info("Table 'whatsapp_telegram_messages' is ready.");
 }
 
 // Call the initialization function

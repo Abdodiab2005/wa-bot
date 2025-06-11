@@ -134,6 +134,83 @@ function deleteAllChatHistories() {
   logger.info("All AI chat histories have been deleted.");
 }
 
+function cacheMessage(messageId, messageObject) {
+  const query = db.prepare(
+    "INSERT OR REPLACE INTO message_cache (message_id, message_data, timestamp) VALUES (?, ?, ?)"
+  );
+  query.run(messageId, JSON.stringify(messageObject), Date.now());
+}
+
+function getArchivedMessage(messageId) {
+  const query = db.prepare(
+    "SELECT message_data FROM message_cache WHERE message_id = ?"
+  );
+  const row = query.get(messageId);
+  return row ? JSON.parse(row.message_data) : null;
+}
+
+function clearOldMessages() {
+  // Delete messages older than 2 hours (7200000 milliseconds)
+  const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+  const query = db.prepare("DELETE FROM message_cache WHERE timestamp < ?");
+  const info = query.run(twoHoursAgo);
+  if (info.changes > 0) {
+    logger.info(
+      `[DB Cleanup] Cleared ${info.changes} old messages from cache.`
+    );
+  }
+}
+
+// =================================================================
+// --- Telegram Whatsapp Channels Functions ---
+// =================================================================
+
+function getTelegramId(whatsappId) {
+  const query = db.prepare(
+    "SELECT telegram_channel_id FROM telegram_whatsapp_channels WHERE whatsapp_group_id = ?"
+  );
+  const row = query.get(whatsappId);
+  return row?.telegram_channel_id || null;
+}
+
+function saveTelegramId(whatsappId, telegramId, lastMessageId) {
+  const query = db.prepare(
+    "INSERT OR REPLACE INTO telegram_whatsapp_channels (whatsapp_group_id, telegram_channel_id, last_message_id) VALUES (?, ?, ?)"
+  );
+  query.run(whatsappId, telegramId, lastMessageId);
+}
+
+function getAllChannels() {
+  const query = db.prepare("SELECT * FROM telegram_whatsapp_channels");
+  return query.all();
+}
+
+// =================================================================
+// --- Telegram Whatsapp Messages Functions ---
+// =================================================================
+
+function saveMessageMapping(whatsappId, telegramId, telegramChannel) {
+  const query = db.prepare(
+    `INSERT OR REPLACE INTO whatsapp_telegram_messages (whatsapp_msg_id, telegram_msg_id, telegram_channel) VALUES (?, ?, ?)`
+  );
+  query.run(whatsappId, telegramId, telegramChannel);
+}
+
+function getTelegramMsgByWhatsappId(whatsappId) {
+  const query = db.prepare(
+    `SELECT telegram_msg_id, telegram_channel FROM whatsapp_telegram_messages WHERE whatsapp_msg_id = ?`
+  );
+  const row = query.get(whatsappId);
+  return row || null;
+}
+
+function deleteMapping(whatsappId) {
+  const query = db.prepare(
+    `DELETE FROM whatsapp_telegram_messages WHERE whatsapp_msg_id = ?`
+  );
+  query.run(whatsappId);
+}
+
 // =================================================================
 // --- Export All Functions ---
 // =================================================================
@@ -158,4 +235,16 @@ module.exports = {
   saveChatHistory,
   deleteChatHistory,
   deleteAllChatHistories,
+  // Message Cache
+  cacheMessage,
+  getArchivedMessage,
+  clearOldMessages,
+  // Telegram Whatsapp Channels
+  getTelegramId,
+  saveTelegramId,
+  getAllChannels,
+  // Telegram Whatsapp Messages
+  saveMessageMapping,
+  getTelegramMsgByWhatsappId,
+  deleteMapping,
 };

@@ -10,9 +10,10 @@
     "weather": "MEMBERS",
     "prayer": "MEMBERS",
     "tagadmins": "MEMBERS",
+    "help": "MEMBERS",
+
     "restart": "OWNER_ONLY",
     "shutdown": "OWNER_ONLY",
-
     "status": "OWNER_ONLY",
     "block": "OWNER_ONLY",
     "unblock": "OWNER_ONLY",

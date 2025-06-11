@@ -4,8 +4,6 @@ const http = require("http");
 const { Server } = require("socket.io");
 const session = require("express-session");
 
-require("dotenv").config();
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);

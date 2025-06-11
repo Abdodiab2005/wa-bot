@@ -3,6 +3,8 @@ const cron = require("node-cron");
 const fs = require("fs");
 const schedulePath = "./config/schedule.json";
 const logger = require("./utils/logger");
+const { clearOldMessages } = require("./utils/storage.js"); // استيراد الدالة الجديدة
+const clearOldMesgsTime = "0 0 */2 * *"; // مرة كل يومين
 
 function getScheduledJobs() {
   if (!fs.existsSync(schedulePath)) return [];
@@ -26,6 +28,11 @@ function initializeScheduledJobs(sock) {
     if (job.status === "active" || job.status === "pending") {
       scheduleNewJob(sock, job);
     }
+  });
+
+  cron.schedule(clearOldMesgsTime, () => {
+    logger.info("[Scheduler] Running hourly cleanup task for message cache...");
+    clearOldMessages();
   });
 }
 
