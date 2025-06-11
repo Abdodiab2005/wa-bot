@@ -2,6 +2,9 @@
 const db = require("../config/db.js"); // Using the path you specified
 const logger = require("../utils/logger");
 
+const fs = require("fs");
+const path = require("path");
+
 // =================================================================
 // --- Group Settings Functions ---
 // =================================================================
@@ -151,15 +154,29 @@ function getArchivedMessage(messageId) {
 }
 
 function clearOldMessages() {
-  // Delete messages older than 2 hours (7200000 milliseconds)
-  const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
-  const query = db.prepare("DELETE FROM message_cache WHERE timestamp < ?");
-  const info = query.run(twoHoursAgo);
-  if (info.changes > 0) {
-    logger.info(
-      `[DB Cleanup] Cleared ${info.changes} old messages from cache.`
-    );
+  const query = db.prepare("DELETE FROM message_cache");
+  query.run();
+
+  const mediaDir = path.join(__dirname, "media");
+
+  if (!fs.existsSync(mediaDir)) {
+    logger.info("📁 مجلد media غير موجود.");
+    return;
   }
+
+  const files = fs.readdirSync(mediaDir);
+
+  for (const file of files) {
+    const filePath = path.join(mediaDir, file);
+    try {
+      fs.unlinkSync(filePath);
+      logger.info(`🗑️ تم حذف: ${file}`);
+    } catch (err) {
+      logger.error(`❌ فشل في حذف ${file}:`, err);
+    }
+  }
+
+  logger.info("✅ تم مسح كل محتويات مجلد media.");
 }
 
 // =================================================================

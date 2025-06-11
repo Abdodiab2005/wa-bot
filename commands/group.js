@@ -83,15 +83,12 @@ module.exports = {
       });
 
     // Check prerequisites from the sub-command file itself
-    console.log(groupMetadata.participants);
     const isBotAdmin = groupMetadata.participants.some((p) => {
-      console.log(p);
       return (
         ["admin", "superadmin"].includes(p.admin) &&
         normalizeJid(p.id) === normalizeJid(sock.user.lid)
       );
     });
-    console.log(isBotAdmin);
     if (subCommand.userAdminRequired && !isSenderAdmin)
       return await sock.sendMessage(msg.key.remoteJid, {
         text: "⚠️ هذا الأمر يتطلب أن تكون مشرفًا.",

@@ -118,6 +118,9 @@ for (const file of commandFiles) {
   }
 }
 
+const mediaDir = path.join(__dirname, "media");
+if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir);
+
 // Prepare anti-spam function
 async function handleAntiSpam(sock, msg) {
   const groupId = msg.key.remoteJid;
@@ -296,7 +299,6 @@ async function connectToWhatsApp() {
     if (m.type !== "notify" || !m.messages[0]) return;
 
     const msg = m.messages[0];
-    console.log(JSON.stringify(msg));
 
     // Handle channels messages
     if (
@@ -428,31 +430,46 @@ async function connectToWhatsApp() {
       !msg.key.remoteJid.endsWith("@newsletter") &&
       !msg.key.fromMe
     ) {
-      let mediaPath = null;
-
-      // store media when recieved localy to restore it when deleted
-      const mediaTypes = [
-        "imageMessage",
-        "videoMessage",
-        "stickerMessage",
-        "audioMessage",
-      ];
       const msgType = Object.keys(msg.message || {})[0];
-      if (mediaTypes.includes(msgType)) {
+      const time = msg.messageTimestamp;
+      const key = msg.key;
+
+      let stored = {
+        key,
+        time,
+        type: msgType,
+      };
+
+      // ✅ رسالة نصية
+      if (msgType === "conversation") {
+        stored.message = msg.message.conversation;
+      }
+
+      // ✅ صورة أو فيديو (مع caption)
+      else if (msgType === "imageMessage" || msgType === "videoMessage") {
         const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
-        const ext = msgType.includes("image")
-          ? "jpg"
-          : msgType.includes("video")
-          ? "mp4"
-          : msgType.includes("audio")
-          ? "mp3"
-          : "webp";
-        const filename = `${msg.key.id}.${ext}`;
+        const ext = msgType === "imageMessage" ? "jpg" : "mp4";
+        const filename = `${key.id}.${ext}`;
         const savePath = path.join(__dirname, "media", filename);
         fs.writeFileSync(savePath, mediaBuffer);
-        mediaPath = savePath;
+
+        stored.mediaPath = savePath;
+        stored.caption = msg.message[msgType].caption || "";
       }
-      cacheMessage(msg.key.id, { ...msg, mediaPath }); // store the media path with the message
+
+      // ✅ استيكر أو صوت (بدون caption)
+      else if (msgType === "stickerMessage" || msgType === "audioMessage") {
+        const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
+        const ext = msgType === "audioMessage" ? "mp3" : "webp";
+        const filename = `${key.id}.${ext}`;
+        const savePath = path.join(__dirname, "media", filename);
+        fs.writeFileSync(savePath, mediaBuffer);
+
+        stored.mediaPath = savePath;
+      }
+
+      // ✅ خزّن الرسالة في الكاش
+      cacheMessage(key.id, stored);
     }
 
     // Handle deleted messages (revoke)
@@ -483,10 +500,14 @@ async function connectToWhatsApp() {
           const logMessage =
             `*🗑️ رسالة محذوفة 🗑️*\n\n` +
             `*من:* @${sender.split("@")[0]}\n` +
-            `*في:* ${groupName}`;
+            `*في:* ${groupName}\n` +
+            `التوقيت: ${new Date(originalMsg.time * 1000).toLocaleString()}\n` +
+            `${originalMsg.caption ? `الكابشن: ${originalMsg.caption}\n` : ""}`;
 
-          const originalMsgContent = originalMsg.message;
-          const msgType = Object.keys(originalMsgContent)[0];
+          const originalMsgContent = originalMsg.type
+            ? originalMsg.message
+            : "";
+          const msgType = originalMsg.type;
 
           const logDestination = LOG_CHAT_ID;
 
@@ -546,9 +567,7 @@ async function connectToWhatsApp() {
             }
           } else {
             // It's a text message
-            const originalText =
-              originalMsgContent.conversation ||
-              originalMsgContent.extendedTextMessage?.text;
+            const originalText = originalMsgContent.message;
             await sock.sendMessage(logDestination, {
               text: `${logMessage}\n*الرسالة:* ${originalText}`,
               mentions: [sender],
