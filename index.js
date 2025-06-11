@@ -425,8 +425,7 @@ async function connectToWhatsApp() {
     if (
       msg.key.id &&
       !msg.key.remoteJid.endsWith("@newsletter") &&
-      !msg.key.fromMe &&
-      CHANNEL_MAP[msg.key.remoteJid]
+      !msg.key.fromMe
     ) {
       let mediaPath = null;
 
