@@ -567,9 +567,8 @@ async function connectToWhatsApp() {
             }
           } else {
             // It's a text message
-            const originalText = originalMsgContent.message;
             await sock.sendMessage(logDestination, {
-              text: `${logMessage}\n*الرسالة:* ${originalText}`,
+              text: `${logMessage}\n*الرسالة:* ${originalMsgContent}`,
               mentions: [sender],
             });
           }
