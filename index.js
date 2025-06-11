@@ -296,6 +296,7 @@ async function connectToWhatsApp() {
     if (m.type !== "notify" || !m.messages[0]) return;
 
     const msg = m.messages[0];
+    console.log(JSON.stringify(msg));
 
     // Handle channels messages
     if (
@@ -570,7 +571,6 @@ async function connectToWhatsApp() {
     if (
       !msg.message ||
       msg.key.remoteJid === "status@broadcast" ||
-      msg.key.fromMe ||
       msg.key.remoteJid.endsWith("@newsletter")
     ) {
       return;

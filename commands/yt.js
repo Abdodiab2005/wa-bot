@@ -1,6 +1,6 @@
 // file: /commands/yt.js (The new unified version)
 const axios = require("axios");
-const ytdl = require("@distube/ytdl-core");
+const play = require("play-dl");
 const logger = require("../utils/logger.js");
 
 const API_KEY = process.env.YOUTUBE_API_KEY;
@@ -60,19 +60,18 @@ async function handleInfo(sock, msg, url) {
 
 async function handleAudio(sock, msg, url) {
   try {
+    console.log(url);
     await sock.sendMessage(msg.key.remoteJid, {
       text: "🎧 جاري تجهيز الملف الصوتي...",
     });
-    const info = await ytdl.getInfo(url);
-    const duration = parseInt(info.videoDetails.lengthSeconds, 10);
 
-    const audioStream = ytdl(url, {
-      filter: "audioonly",
-      quality: "highestaudio",
-    });
+    const { stream, type } = await play.stream(url, { quality: 1 }); // جودة صوت عالية
+    const info = await play.video_basic_info(url);
+    const duration = parseInt(info.video_details.durationInSec, 10);
+
     await sock.sendMessage(msg.key.remoteJid, {
-      audio: { stream: audioStream },
-      mimetype: "audio/mp4",
+      audio: { stream },
+      mimetype: "audio/mpeg",
     });
   } catch (error) {
     logger.error({ err: error }, "Error in !yt audio command");
@@ -87,17 +86,16 @@ async function handleVideo(sock, msg, url) {
     await sock.sendMessage(msg.key.remoteJid, {
       text: "🎬 جاري تجهيز الفيديو...",
     });
-    const info = await ytdl.getInfo(url);
-    const duration = parseInt(info.videoDetails.lengthSeconds, 10);
 
-    const videoStream = ytdl(url, {
-      quality: "lowest",
-      filter: "videoandaudio",
-    });
+    const { stream, type } = await play.stream(url, { quality: 0 }); // أقل جودة (علشان الحجم)
+    const info = await play.video_basic_info(url);
+    const title = info.video_details.title;
+    const duration = parseInt(info.video_details.durationInSec, 10);
+
     await sock.sendMessage(msg.key.remoteJid, {
-      video: { stream: videoStream },
+      video: { stream },
       mimetype: "video/mp4",
-      caption: info.videoDetails.title,
+      caption: title,
     });
   } catch (error) {
     logger.error({ err: error }, "Error in !yt video command");
@@ -145,7 +143,7 @@ module.exports = {
       url = args[0];
     }
 
-    if (!url || !ytdl.validateURL(url)) {
+    if (!url || !(await play.validate(url))) {
       return await sock.sendMessage(msg.key.remoteJid, {
         text: "يرجى إرسال رابط يوتيوب صالح.\n\n*الاستخدام:*\n`!yt <link>`\n`!yt info <link>`\n`!yt audio <link>`\n`!yt video <link>`",
       });
@@ -154,6 +152,7 @@ module.exports = {
     // Call the appropriate handler based on the subcommand
     switch (subCommand) {
       case "audio":
+        console.log(url);
         await handleAudio(sock, msg, url);
         break;
       case "video":

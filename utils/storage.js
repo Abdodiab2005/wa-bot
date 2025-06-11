@@ -1,5 +1,6 @@
 // file: /utils/storage.js
 const db = require("../config/db.js"); // Using the path you specified
+const logger = require("../utils/logger");
 
 // =================================================================
 // --- Group Settings Functions ---
