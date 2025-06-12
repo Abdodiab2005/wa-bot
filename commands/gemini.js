@@ -1,8 +1,5 @@
-// file: /commands/gemini.js (Corrected sub-command parsing)
-const {
-  GoogleGenerativeAI,
-  FunctionDeclarationSchemaType,
-} = require("@google/generative-ai");
+// تم المراجعة والإصلاح بواسطة Gemini
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const logger = require("../utils/logger.js");
 const {
   getChatHistory,
@@ -15,28 +12,31 @@ const normalizeJid = require("../utils/normalizeJid.js");
 const axios = require("axios");
 
 const API_KEY = process.env.GEMINI_API_KEY;
-if (!API_KEY) logger.error("GEMINI_API_KEY is not defined!");
+if (!API_KEY) {
+  logger.error("GEMINI_API_KEY is not defined!");
+  // اخرج من التطبيق لو مفيش مفتاح API عشان متكملش على الفاضي
+  process.exit(1);
+}
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 
-// ✅ التعديل هنا
 const tools = [
   {
-    // أداة البحث من جوجل
     googleSearch: {},
   },
   {
-    // تعريف الـ Functions بتاعتك
     functionDeclarations: [
       {
         name: "fetchUrlContent",
-        description: "Fetch content from a URL.",
+        description:
+          "Fetches the content of a given URL. Use this when a user provides a link and asks for a summary or information from it.",
         parameters: {
-          type: FunctionDeclarationSchemaType.OBJECT,
+          // ✅ تم الإصلاح: استخدام النصوص العادية لتجنب مشاكل الإصدارات
+          type: "OBJECT",
           properties: {
             url: {
-              type: FunctionDeclarationSchemaType.STRING,
-              description: "The URL to fetch content from.",
+              type: "STRING",
+              description: "The full URL to fetch content from.",
             },
           },
           required: ["url"],
@@ -46,22 +46,32 @@ const tools = [
   },
 ];
 
-async function fetchUrlContent(url) {
+// ✅ تم الإصلاح: تعديل الدالة لاستقبال object وتفكيكه
+async function fetchUrlContent({ url }) {
+  // التأكد من أن الـ URL صحيح قبل إرسال الطلب
+  if (!url || !url.startsWith("http")) {
+    return { error: "Invalid or missing URL provided." };
+  }
+
   try {
-    const response = await axios.get(url);
-    // ممكن تحتاج ترجع المحتوى كنص فقط عشان الموديل يقدر يقرأه بسهولة
-    return { content: JSON.stringify(response.data).substring(0, 2000) }; // اختصرت المحتوى عشان ميكونش طويل أوي
+    const response = await axios.get(url, { timeout: 5000 }); // إضافة timeout
+    // تحويل المحتوى لنص وتحديد حد أقصى للحجم
+    const content = JSON.stringify(response.data);
+    return { content: content.substring(0, 4000) };
   } catch (error) {
     logger.error({ err: error }, `Error fetching URL content: ${url}`);
-    // رجع رسالة خطأ واضحة للموديل
+    // إرجاع رسالة خطأ واضحة للموديل
     return {
-      error: `Failed to fetch content from ${url}. Status: ${error.response?.status}`,
+      error: `Failed to fetch content from the URL. It might be down or blocked. Status: ${
+        error.response?.status || error.message
+      }`,
     };
   }
 }
 
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash-preview-05-20",
+  // ✅ تم الإصلاح: استخدام اسم موديل مستقر ومعروف
+  model: "gemini-1.5-flash-latest",
   tools,
   systemInstruction: `
 ---
@@ -83,13 +93,16 @@ You are 'Levi' (ليڤاي), a witty and fun AI WhatsApp bot. You were developed
 2.  **Sensitive Topics:** If asked about sensitive political, religious, or highly personal topics, politely deflect with a funny or neutral response. Example: "يا عم دي أسئلة عميقة، ما تيجي نسأل في حاجة أروق زي أحسن نوع بيتزا؟ 😉".
 3.  **Stay in Character:** Never break character. Do not say you are a language model or AI developed by Google. You are 'Levi', the WhatsApp bot.
 
-### SPECIAL CAPABILITIES ###
-- **Real-time Questions:** When you detect a question about a recent event, a new trend, a specific price, or any topic that requires current information, you MUST use your provided search tool.
-- **Modern Answers:** After searching, do not dump the information formally. Summarize it in your own funny and modern style. Simplify complex topics and present them in a cool, easy-to-understand way.
+### SPECIAL CAPABILITIES (TOOLS) ###
+- **Google Search:** When a question requires real-time information (e.g., recent events, trends, prices, weather), you MUST use the 'googleSearch' tool.
+- **URL Fetching:** When a user provides a URL and asks to summarize or get info from it, you MUST use the 'fetchUrlContent' function.
+- **Tool Output Handling:** After calling a tool, examine its output. If the output contains an 'error' field, inform the user you couldn't complete the request in a funny or apologetic way (e.g., "اللينك ده شكله بايظ يا كبير" or "معرفتش أوصل للمعلومة دي 😥"). If successful, summarize the content in your own style. Do not just dump the raw data.
 ---
   `,
 });
 
+// باقي الكود بتاعك اللي بيستدعي الموديل المفروض يفضل زي ما هو
+// على سبيل المثال، الجزء اللي بيستقبل الرسالة ويبعتها للموديل
 module.exports = {
   name: "gemini",
   aliases: ["ask", "ai", "resetai", "del", "delall"],
