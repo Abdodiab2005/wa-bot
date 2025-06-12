@@ -1,5 +1,8 @@
 // file: /commands/gemini.js (Corrected sub-command parsing)
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const {
+  GoogleGenerativeAI,
+  FunctionDeclarationSchemaType,
+} = require("@google/generative-ai");
 const logger = require("../utils/logger.js");
 const {
   getChatHistory,
