@@ -1,4 +1,3 @@
-// file: /commands/autoschedule.js
 const {
   scheduleNewJob,
   getScheduledJobs,
