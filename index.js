@@ -121,6 +121,18 @@ for (const file of commandFiles) {
 const mediaDir = path.join(__dirname, "media");
 if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir);
 
+// Date options
+const options = {
+  timeZone: "Africa/Cairo", // <-- هذا هو الجزء الأهم
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: true, // لعرض الوقت بنظام 12 ساعة (صباحًا/مساءً)
+};
+
 // Prepare anti-spam function
 async function handleAntiSpam(sock, msg) {
   const groupId = msg.key.remoteJid;
@@ -501,7 +513,9 @@ async function connectToWhatsApp() {
             `*🗑️ رسالة محذوفة 🗑️*\n\n` +
             `*من:* @${sender.split("@")[0]}\n` +
             `*في:* ${groupName}\n` +
-            `التوقيت: ${new Date(originalMsg.time * 1000).toLocaleString()}\n` +
+            `التوقيت: ${new Date(originalMsg.time * 1000).toLocaleString(
+              options
+            )}\n` +
             `${originalMsg.caption ? `الكابشن: ${originalMsg.caption}\n` : ""}`;
 
           const originalMsgContent = originalMsg.type

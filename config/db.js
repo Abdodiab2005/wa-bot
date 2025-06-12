@@ -87,6 +87,15 @@ CREATE TABLE IF NOT EXISTS whatsapp_telegram_messages (
   )`;
   db.exec(createTG_WA_MessagesTable);
   logger.info("Table 'whatsapp_telegram_messages' is ready.");
+
+  const createBooksTable = `
+CREATE TABLE IF NOT EXISTS books (
+    book_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    link TEXT NOT NULL
+);`;
+  db.exec(createBooksTable);
+  logger.info("Table 'books' is ready.");
 }
 
 // Call the initialization function

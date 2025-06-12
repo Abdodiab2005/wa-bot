@@ -230,6 +230,33 @@ function deleteMapping(whatsappId) {
 }
 
 // =================================================================
+// --- Books Functions ---
+// =================================================================
+
+function saveBook(bookId, title, link) {
+  const query = db.prepare(
+    "INSERT OR REPLACE INTO books (book_id, title, link) VALUES (?, ?, ?)"
+  );
+  query.run(bookId, title, link);
+}
+
+function getBook(bookId) {
+  const query = db.prepare("SELECT * FROM books WHERE book_id = ?");
+  const row = query.get(bookId);
+  return row || null;
+}
+
+function getAllBooks() {
+  const query = db.prepare("SELECT * FROM books");
+  return query.all();
+}
+
+function deleteBook(bookId) {
+  const query = db.prepare("DELETE FROM books WHERE book_id = ?");
+  query.run(bookId);
+}
+
+// =================================================================
 // --- Export All Functions ---
 // =================================================================
 module.exports = {
@@ -265,4 +292,9 @@ module.exports = {
   saveMessageMapping,
   getTelegramMsgByWhatsappId,
   deleteMapping,
+  // Books
+  saveBook,
+  getBook,
+  getAllBooks,
+  deleteBook,
 };

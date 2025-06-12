@@ -11,6 +11,7 @@
     "prayer": "MEMBERS",
     "tagadmins": "MEMBERS",
     "help": "MEMBERS",
+    "books": "MEMBERS",
 
     "restart": "OWNER_ONLY",
     "shutdown": "OWNER_ONLY",
