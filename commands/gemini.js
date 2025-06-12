@@ -16,40 +16,49 @@ if (!API_KEY) logger.error("GEMINI_API_KEY is not defined!");
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 
+// ✅ التعديل هنا
 const tools = [
   {
-    googleSearchRetriever: {},
+    // أداة البحث من جوجل
+    googleSearch: {},
   },
   {
-    functionDeclaration: {
-      name: "fetchUrlContent",
-      description: "Fetch content from a URL.",
-      parameters: {
-        type: "OBJECT",
-        properties: {
-          url: {
-            type: "STRING",
-            description: "The URL to fetch content from.",
+    // تعريف الـ Functions بتاعتك
+    functionDeclarations: [
+      {
+        name: "fetchUrlContent",
+        description: "Fetch content from a URL.",
+        parameters: {
+          type: FunctionDeclarationSchemaType.OBJECT,
+          properties: {
+            url: {
+              type: FunctionDeclarationSchemaType.STRING,
+              description: "The URL to fetch content from.",
+            },
           },
+          required: ["url"],
         },
-        required: ["url"],
       },
-    },
+    ],
   },
 ];
 
 async function fetchUrlContent(url) {
   try {
     const response = await axios.get(url);
-    return response.data;
+    // ممكن تحتاج ترجع المحتوى كنص فقط عشان الموديل يقدر يقرأه بسهولة
+    return { content: JSON.stringify(response.data).substring(0, 2000) }; // اختصرت المحتوى عشان ميكونش طويل أوي
   } catch (error) {
     logger.error({ err: error }, `Error fetching URL content: ${url}`);
-    return null;
+    // رجع رسالة خطأ واضحة للموديل
+    return {
+      error: `Failed to fetch content from ${url}. Status: ${error.response?.status}`,
+    };
   }
 }
 
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.0-flash",
+  model: "gemini-2.5-flash-preview-05-20",
   tools,
   systemInstruction: `
 ---
