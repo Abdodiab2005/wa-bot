@@ -440,7 +440,8 @@ async function connectToWhatsApp() {
     if (
       msg.key.id &&
       !msg.key.remoteJid.endsWith("@newsletter") &&
-      !msg.key.fromMe
+      !msg.key.fromMe &&
+      !msg.key.remoteJid.endsWith("@broadcast")
     ) {
       const msgType = Object.keys(msg.message || {})[0];
       const time = msg.messageTimestamp;
