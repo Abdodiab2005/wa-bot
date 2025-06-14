@@ -492,7 +492,8 @@ async function connectToWhatsApp() {
       (msg.message?.protocolMessage?.type &&
         msg.message?.protocolMessage?.type !== undefined) !== undefined &&
       !msg.key.remoteJid.endsWith("@newsletter") &&
-      !msg.key.fromMe
+      !msg.key.fromMe &&
+      !msg.key.remoteJid.endsWith("@broadcast")
     ) {
       logger.info(`[Anti-Delete] Deletion event detected.`);
 
