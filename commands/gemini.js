@@ -23,10 +23,10 @@ const genAI = new GoogleGenerativeAI(API_KEY);
 
 const tools = [
   {
+    // سنضع بحث جوجل ودوالك الخاصة في نفس الكائن
     googleSearch: {},
-  },
-  {
-    function_declarations: [
+
+    functionDeclarations: [
       {
         name: "fetchUrlContent",
         description:
