@@ -26,7 +26,7 @@ const tools = [
     googleSearch: {},
   },
   {
-    functionDeclarations: [
+    function_declarations: [
       {
         name: "fetchUrlContent",
         description:
