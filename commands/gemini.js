@@ -82,8 +82,7 @@ async function fetchUrlContent(url) {
 }
 
 const model = genAI.getGenerativeModel({
-  // ✅ تم الإصلاح: استخدام اسم موديل مستقر ومعروف
-  model: "gemini-2.0-flash",
+  model: "gemini-2.5-flash-preview-05-20",
   tools,
   systemInstruction: `
 ---
