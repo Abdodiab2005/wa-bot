@@ -10,6 +10,7 @@ const {
 const config = require("../config/config.json");
 const normalizeJid = require("../utils/normalizeJid.js");
 const axios = require("axios");
+const { delay } = require("@whiskeysockets/baileys");
 
 const API_KEY = process.env.GEMINI_API_KEY;
 if (!API_KEY) {
@@ -24,48 +25,59 @@ const tools = [
   {
     googleSearch: {},
   },
-  // {
-  //   functionDeclarations: [
-  //     {
-  //       name: "fetchUrlContent",
-  //       description:
-  //         "Fetches the content of a given URL. Use this when a user provides a link and asks for a summary or information from it.",
-  //       parameters: {
-  //         // ✅ تم الإصلاح: استخدام النصوص العادية لتجنب مشاكل الإصدارات
-  //         type: "OBJECT",
-  //         properties: {
-  //           url: {
-  //             type: "STRING",
-  //             description: "The full URL to fetch content from.",
-  //           },
-  //         },
-  //         required: ["url"],
-  //       },
-  //     },
-  //   ],
-  // },
+  {
+    functionDeclarations: [
+      {
+        name: "fetchUrlContent",
+        description:
+          "Fetches the content of a given URL. Use this when a user provides a link and asks for a summary or information from it. It can fetch text content like HTML or JSON.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            url: {
+              type: "STRING",
+              description: "The full URL to fetch content from.",
+            },
+          },
+          required: ["url"],
+        },
+      },
+    ],
+  },
 ];
 
-// ✅ تم الإصلاح: تعديل الدالة لاستقبال object وتفكيكه
-async function fetchUrlContent({ url }) {
-  // التأكد من أن الـ URL صحيح قبل إرسال الطلب
-  if (!url || !url.startsWith("http")) {
-    return { error: "Invalid or missing URL provided." };
-  }
-
+// ✅ إصلاح دالة fetchUrlContent لتلقت الأخطاء بشكل صحيح
+async function fetchUrlContent(url) {
   try {
-    const response = await axios.get(url, { timeout: 5000 }); // إضافة timeout
-    // تحويل المحتوى لنص وتحديد حد أقصى للحجم
-    const content = JSON.stringify(response.data);
-    return { content: content.substring(0, 4000) };
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      const errorMessage = `HTTP error! Status: ${response.status} from ${url}`;
+      logger.error({ status: response.status, url: url }, errorMessage); // تسجيل الخطأ
+      throw new Error(errorMessage); // رمي الخطأ ليتم التقاطه في try-catch الخارجي
+    }
+
+    const contentType = response.headers.get("content-type");
+
+    if (contentType && contentType.includes("application/json")) {
+      return await response.json();
+    } else if (
+      (contentType && contentType.includes("text/html")) ||
+      (contentType && contentType.includes("text/plain"))
+    ) {
+      return await response.text();
+    } else {
+      const warningMessage = `Unexpected content type: ${contentType} for ${url}. Attempting to return as text.`;
+      logger.warn({ contentType: contentType, url: url }, warningMessage); // تسجيل تحذير
+      return await response.text();
+    }
   } catch (error) {
-    logger.error({ err: error }, `Error fetching URL content: ${url}`);
-    // إرجاع رسالة خطأ واضحة للموديل
-    return {
-      error: `Failed to fetch content from the URL. It might be down or blocked. Status: ${
-        error.response?.status || error.message
-      }`,
-    };
+    // هذا الجزء سيلتقط أخطاء الشبكة أو المشاكل الأخرى في fetch نفسها
+    logger.error(
+      { err: error, url: url },
+      `Failed to fetch content from ${url}: ${error.message}`
+    );
+    throw error; // رمي الخطأ ليتم التقاطه في try-catch الخارجي
   }
 }
 
@@ -76,7 +88,10 @@ const model = genAI.getGenerativeModel({
   systemInstruction: `
 ---
 ### CORE PERSONA ###
-You are 'Levi' (ليڤاي), a witty and fun AI WhatsApp bot. You were developed by the Egyptian engineer Abdelrhman Diab. Your primary function is to be an interesting, engaging, and humorous chat partner. You are not a generic assistant; you are a personality.
+- You are 'Levi' (ليڤاي), a witty and fun AI WhatsApp bot. You were developed by the Egyptian engineer Abdelrhman Diab. Your primary function is to be an interesting, engaging, and humorous chat partner. You are not a generic assistant; you are a personality.
+- In this ongoing conversation, you will receive messages from me, the primary user. You also have access to the \`sender_username\` for any incoming messages from others. Use this sender_username to refer to the person who sent that specific message, 
+while always understanding that I am and the \`sender_username\` are the in the same chat (can see the same messages you send).
+
 
 ### Response format ###
 - Use short and simple sentences.
@@ -111,6 +126,7 @@ module.exports = {
 
   async execute(sock, msg, args, body) {
     const chatId = msg.key.remoteJid;
+    const userName = msg.pushName;
     const senderId = normalizeJid(msg.key.participant || msg.key.remoteJid);
     const isOwner = config.owners.includes(senderId);
 
@@ -119,6 +135,10 @@ module.exports = {
 
     // --- 1. Handle Memory Management Commands FIRST ---
     if (subCommand === "del" || subCommand === "resetai") {
+      if (!isOwner)
+        return await sock.sendMessage(chatId, {
+          text: "🚫 هذا الأمر مخصص للمالك فقط.",
+        });
       deleteChatHistory(chatId);
       return await sock.sendMessage(chatId, {
         text: "✅ تم مسح ذاكرة هذه المحادثة.",
@@ -160,13 +180,66 @@ module.exports = {
       });
 
     try {
+      await delay(500);
       await sock.sendMessage(chatId, { text: "🤖 أفكر..." });
 
       const history = getChatHistory(chatId);
       const chat = model.startChat({ history: history });
-      const result = await chat.sendMessage(prompt);
+      const result = await chat.sendMessage(
+        `\`sender_username\` (${userName}): ${prompt}`
+      );
       const response = await result.response;
-      const responseText = response.text();
+      let finalResponseText = "";
+      while (response.toolCalls && response.toolCalls.length > 0) {
+        const toolCall = response.toolCalls[0];
+
+        if (
+          toolCall.functionCall &&
+          toolCall.functionCall.name === "fetchUrlContent"
+        ) {
+          const { name, args } = toolCall.functionCall;
+          console.log(`Model wants to call function: ${name} with args:`, args);
+
+          try {
+            const content = await fetchUrlContent(args.url); // هنا fetchUrlContent هترمي error لو فشلت
+            console.log(
+              "Fetched content (truncated):",
+              content.substring(0, 200) + "..."
+            );
+
+            currentResponse = await chat.sendMessage([
+              {
+                toolResponse: {
+                  toolCallId: toolCall.id,
+                  response: { content: content },
+                },
+              },
+            ]);
+            response = currentResponse.response; // Update response for next iteration/final text
+          } catch (error) {
+            // هنا الخطأ هيتم التقاطه بسبب الـ "throw error" في fetchUrlContent
+            logger.error({ err: error }, "Error executing fetchUrlContent");
+
+            currentResponse = await chat.sendMessage([
+              {
+                toolResponse: {
+                  toolCallId: toolCall.id,
+                  response: { error: error.message }, // أرسل الخطأ للموديل
+                },
+              },
+            ]);
+            response = currentResponse.response; // Update response to get AI's error handling text
+          }
+        } else {
+          // If there's a tool call but it's not fetchUrlContent (e.g., googleSearch)
+          // You'd need to handle that tool here similarly.
+          // For now, if an unhandled tool is called, we'll break and use the current response.
+          console.warn("Unhandled tool call:", toolCall);
+          break; // Exit loop if we don't know how to handle this tool
+        }
+      }
+      // After all tool calls (or if none), get the final text response
+      finalResponseText = response.text();
 
       const newHistory = await chat.getHistory();
       if (newHistory.length > 20) {
@@ -174,9 +247,11 @@ module.exports = {
       }
       saveChatHistory(chatId, newHistory);
 
-      await sock.sendMessage(chatId, { text: responseText });
+      await delay(500);
+      await sock.sendMessage(chatId, { text: finalResponseText });
     } catch (error) {
       logger.error({ err: error }, `Error in !gemini command`);
+      await delay(200);
       await sock.sendMessage(chatId, {
         text: "حدث خطأ أثناء التواصل مع الذكاء الاصطناعي.",
       });
