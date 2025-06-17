@@ -82,7 +82,7 @@ async function fetchUrlContent(url) {
 }
 
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash-preview-05-20",
+  model: "gemini-1.5-pro",
   tools,
   systemInstruction: `
 ---
