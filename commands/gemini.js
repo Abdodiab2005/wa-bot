@@ -9,23 +9,25 @@ const {
 } = require("../utils/storage.js");
 const config = require("../config/config.json");
 const normalizeJid = require("../utils/normalizeJid.js");
-const axios = require("axios");
+// const axios = require("axios"); // لم نعد نستخدم axios مباشرة هنا، fetch كفاية
 const { delay } = require("@whiskeysockets/baileys");
+const fs = require("fs").promises; // ✅ لإضافة التعامل مع الملفات
+const path = require("path"); // ✅ لإضافة التعامل مع المسارات
 
 const API_KEY = process.env.GEMINI_API_KEY;
 if (!API_KEY) {
   logger.error("GEMINI_API_KEY is not defined!");
-  // اخرج من التطبيق لو مفيش مفتاح API عشان متكملش على الفاضي
   process.exit(1);
 }
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 
+// ✅ تعريف الـ tools بشكل صحيح (لكل أداة أوبجيكت منفصل)
 const tools = [
   {
-    // سنضع بحث جوجل ودوالك الخاصة في نفس الكائن
-    googleSearch: {},
-
+    googleSearch: {}, // أوبجيكت مستقل لـ Google Search
+  },
+  {
     functionDeclarations: [
       {
         name: "fetchUrlContent",
@@ -53,8 +55,8 @@ async function fetchUrlContent(url) {
 
     if (!response.ok) {
       const errorMessage = `HTTP error! Status: ${response.status} from ${url}`;
-      logger.error({ status: response.status, url: url }, errorMessage); // تسجيل الخطأ
-      throw new Error(errorMessage); // رمي الخطأ ليتم التقاطه في try-catch الخارجي
+      logger.error({ status: response.status, url: url }, errorMessage);
+      throw new Error(errorMessage);
     }
 
     const contentType = response.headers.get("content-type");
@@ -68,19 +70,19 @@ async function fetchUrlContent(url) {
       return await response.text();
     } else {
       const warningMessage = `Unexpected content type: ${contentType} for ${url}. Attempting to return as text.`;
-      logger.warn({ contentType: contentType, url: url }, warningMessage); // تسجيل تحذير
+      logger.warn({ contentType: contentType, url: url }, warningMessage);
       return await response.text();
     }
   } catch (error) {
-    // هذا الجزء سيلتقط أخطاء الشبكة أو المشاكل الأخرى في fetch نفسها
     logger.error(
       { err: error, url: url },
       `Failed to fetch content from ${url}: ${error.message}`
     );
-    throw error; // رمي الخطأ ليتم التقاطه في try-catch الخارجي
+    throw error;
   }
 }
 
+// ✅ الموديل الآن هو gemini-1.5-flash لضمان دعم الـ tools
 const model = genAI.getGenerativeModel({
   model: "gemini-1.5-flash",
   tools,
@@ -115,8 +117,6 @@ while always understanding that I am and the \`sender_username\` are the in the 
   `,
 });
 
-// باقي الكود بتاعك اللي بيستدعي الموديل المفروض يفضل زي ما هو
-// على سبيل المثال، الجزء اللي بيستقبل الرسالة ويبعتها للموديل
 module.exports = {
   name: "gemini",
   aliases: ["ask", "ai", "resetai", "del", "delall"],
@@ -126,6 +126,7 @@ module.exports = {
   async execute(sock, msg, args, body) {
     const chatId = msg.key.remoteJid;
     const userName = msg.pushName;
+    console.log(`Sender name: ${userName}`);
     const senderId = normalizeJid(msg.key.participant || msg.key.remoteJid);
     const isOwner = config.owners.includes(senderId);
 
@@ -154,24 +155,120 @@ module.exports = {
       });
     }
 
-    // --- 2. If it's not a management command, then build the prompt ---
     let prompt = args.join(" ");
-    if (!prompt) {
+    let parts = []; // ✅ لجمع الأجزاء المختلفة للرسالة (نص، صورة، صوت)
+
+    // ✅ --- التعامل مع الصور والفيديوهات (Multimodal Input) ---
+    if (msg.message?.imageMessage || msg.message?.videoMessage) {
+      const mediaMessage = msg.message.imageMessage || msg.message.videoMessage;
+      const mediaBuffer = await sock.downloadMediaMessage(
+        mediaMessage,
+        "buffer"
+      );
+
+      // ✅ حفظ الملف مؤقتاً لرفعه لـ Gemini
+      const tempFilePath = path.join(__dirname, `temp_media_${Date.now()}`);
+      await fs.writeFile(tempFilePath, mediaBuffer);
+
+      try {
+        const uploadResponse = await genAI.uploadFile(tempFilePath);
+        parts.push({
+          fileData: {
+            mimeType: mediaMessage.mimetype,
+            uri: uploadResponse.file.uri,
+          },
+        });
+        logger.info(`Uploaded media to Gemini: ${uploadResponse.file.uri}`);
+
+        // ✅ إضافة الكابشن كجزء نصي إذا وجد
+        if (mediaMessage.caption) {
+          prompt = mediaMessage.caption; // الكابشن هو البرومبت الأساسي
+          parts.push({ text: prompt });
+        } else if (prompt) {
+          // لو في نص بس مفيش كابشن، نضيف النص
+          parts.push({ text: prompt });
+        } else {
+          // لو لا كابشن ولا نص، نحط برومبت افتراضي
+          parts.push({ text: "ماذا يوجد في هذه الصورة/الفيديو؟" });
+        }
+      } catch (uploadError) {
+        logger.error({ err: uploadError }, "Failed to upload media to Gemini.");
+        await sock.sendMessage(chatId, {
+          text: "حصل مشكلة وأنا بحاول أشوف الصورة أو الفيديو ده 😔.",
+        });
+        await fs.unlink(tempFilePath); // مسح الملف المؤقت حتى لو فشل الرفع
+        return;
+      } finally {
+        await fs.unlink(tempFilePath); // مسح الملف المؤقت
+      }
+    }
+    // ✅ --- التعامل مع الفويس نوت (Audio Input) ---
+    else if (msg.message?.audioMessage) {
+      const audioMessage = msg.message.audioMessage;
+      // ملاحظة: Baileys بينزل الفويس نوت كـ OGG/Opus عادة
+      // Gemini بيدعم OGG/Opus/MP3. لو عندك مشاكل، ممكن تحتاج تحويل بـ ffmpeg
+      const audioBuffer = await sock.downloadMediaMessage(
+        audioMessage,
+        "buffer"
+      );
+
+      const tempAudioPath = path.join(__dirname, `temp_audio_${Date.now()}`);
+      await fs.writeFile(tempAudioPath, audioBuffer);
+
+      try {
+        const uploadResponse = await genAI.uploadFile(tempAudioPath);
+        parts.push({
+          fileData: {
+            mimeType: audioMessage.mimetype, // غالبا 'audio/ogg; codecs=opus'
+            uri: uploadResponse.file.uri,
+          },
+        });
+        logger.info(`Uploaded audio to Gemini: ${uploadResponse.file.uri}`);
+
+        // ✅ إضافة نص افتراضي لتوجيه Gemini لتحليل الصوت
+        if (prompt) {
+          parts.push({ text: prompt }); // لو فيه نص مع الفويس
+        } else {
+          parts.push({ text: "حلل لي هذا التسجيل الصوتي." });
+        }
+      } catch (uploadError) {
+        logger.error({ err: uploadError }, "Failed to upload audio to Gemini.");
+        await sock.sendMessage(chatId, {
+          text: "فيه مشكلة وأنا بحاول أسمع التسجيل الصوتي ده 😔.",
+        });
+        await fs.unlink(tempAudioPath); // مسح الملف المؤقت حتى لو فشل الرفع
+        return;
+      } finally {
+        await fs.unlink(tempAudioPath); // مسح الملف المؤقت
+      }
+    }
+    // ✅ --- التعامل مع الرسائل النصية فقط (لو مفيش صور أو فويس) ---
+    else if (prompt) {
+      parts.push({ text: prompt });
+    }
+
+    // ✅ لو مفيش أي نوع محتوى، نطلع رسالة خطأ
+    if (parts.length === 0) {
       return await sock.sendMessage(chatId, {
-        text: "يرجى كتابة سؤال أو طلب بعد الأمر.",
+        text: "يرجى كتابة سؤال أو إرسال صورة/فيديو/تسجيل صوتي مع الأمر.",
       });
     }
 
-    // Check for reply context
+    // Check for reply context (ده هيندمج مع الـ parts)
     const quotedMsg =
       msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
     if (quotedMsg) {
       const quotedText =
         quotedMsg.conversation || quotedMsg.extendedTextMessage?.text;
       if (quotedText) {
-        prompt = `بالاعتماد على هذه الرسالة كمرجع:\n"""\n${quotedText}\n"""\n\nأجب على التالي:\n${prompt}`;
+        // ✅ إضافة الرسالة المقتبسة كجزء نصي في البداية
+        parts.unshift({
+          text: `بالاعتماد على هذه الرسالة كمرجع:\n"""\n${quotedText}\n"""\n\nأجب على التالي:`,
+        });
       }
     }
+    // ✅ إضافة اسم المرسل للبرومبت
+    parts.unshift({ text: `\`sender_username\` (${userName}): ` });
 
     if (!API_KEY)
       return await sock.sendMessage(chatId, {
@@ -184,11 +281,12 @@ module.exports = {
 
       const history = getChatHistory(chatId);
       const chat = model.startChat({ history: history });
-      const result = await chat.sendMessage(
-        `\`sender_username\` (${userName}): ${prompt}`
-      );
+
+      // ✅ هنا هنستخدم parts بدلاً من prompt كـ string
+      const result = await chat.sendMessage(parts); // ✅ تغيير هنا
       const response = await result.response;
       let finalResponseText = "";
+
       while (response.toolCalls && response.toolCalls.length > 0) {
         const toolCall = response.toolCalls[0];
 
@@ -200,7 +298,7 @@ module.exports = {
           console.log(`Model wants to call function: ${name} with args:`, args);
 
           try {
-            const content = await fetchUrlContent(args.url); // هنا fetchUrlContent هترمي error لو فشلت
+            const content = await fetchUrlContent(args.url);
             console.log(
               "Fetched content (truncated):",
               content.substring(0, 200) + "..."
@@ -214,30 +312,60 @@ module.exports = {
                 },
               },
             ]);
-            response = currentResponse.response; // Update response for next iteration/final text
+            response = currentResponse.response;
           } catch (error) {
-            // هنا الخطأ هيتم التقاطه بسبب الـ "throw error" في fetchUrlContent
             logger.error({ err: error }, "Error executing fetchUrlContent");
 
             currentResponse = await chat.sendMessage([
               {
                 toolResponse: {
                   toolCallId: toolCall.id,
-                  response: { error: error.message }, // أرسل الخطأ للموديل
+                  response: { error: error.message },
                 },
               },
             ]);
-            response = currentResponse.response; // Update response to get AI's error handling text
+            response = currentResponse.response;
+          }
+        }
+        // ✅ إضافة التعامل مع googleSearch لو الموديل طلبها
+        else if (
+          toolCall.functionCall &&
+          toolCall.functionCall.name === "googleSearch"
+        ) {
+          const { name, args } = toolCall.functionCall;
+          console.log(`Model wants to call function: ${name} with args:`, args);
+
+          try {
+            // Note: Google Search tool doesn't require explicit arguments from your side.
+            // It uses the context of the prompt to perform the search.
+            // We just need to respond with an empty toolResponse for it to work with the SDK
+            // The AI will interpret the search results automatically
+            currentResponse = await chat.sendMessage([
+              {
+                toolResponse: {
+                  toolCallId: toolCall.id,
+                  response: { success: true }, // فقط لإخبار الموديل أن الأداة تم استدعاؤها
+                },
+              },
+            ]);
+            response = currentResponse.response;
+          } catch (error) {
+            logger.error({ err: error }, "Error executing googleSearch tool");
+            currentResponse = await chat.sendMessage([
+              {
+                toolResponse: {
+                  toolCallId: toolCall.id,
+                  response: { error: error.message },
+                },
+              },
+            ]);
+            response = currentResponse.response;
           }
         } else {
-          // If there's a tool call but it's not fetchUrlContent (e.g., googleSearch)
-          // You'd need to handle that tool here similarly.
-          // For now, if an unhandled tool is called, we'll break and use the current response.
           console.warn("Unhandled tool call:", toolCall);
-          break; // Exit loop if we don't know how to handle this tool
+          break;
         }
       }
-      // After all tool calls (or if none), get the final text response
       finalResponseText = response.text();
 
       const newHistory = await chat.getHistory();
