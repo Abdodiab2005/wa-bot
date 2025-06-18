@@ -27,25 +27,25 @@ const tools = [
   {
     googleSearch: {}, // أوبجيكت مستقل لـ Google Search
   },
-  {
-    functionDeclarations: [
-      {
-        name: "fetchUrlContent",
-        description:
-          "Fetches the content of a given URL. Use this when a user provides a link and asks for a summary or information from it. It can fetch text content like HTML or JSON.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            url: {
-              type: "STRING",
-              description: "The full URL to fetch content from.",
-            },
-          },
-          required: ["url"],
-        },
-      },
-    ],
-  },
+  // {
+  //   functionDeclarations: [
+  //     {
+  //       name: "fetchUrlContent",
+  //       description:
+  //         "Fetches the content of a given URL. Use this when a user provides a link and asks for a summary or information from it. It can fetch text content like HTML or JSON.",
+  //       parameters: {
+  //         type: "OBJECT",
+  //         properties: {
+  //           url: {
+  //             type: "STRING",
+  //             description: "The full URL to fetch content from.",
+  //           },
+  //         },
+  //         required: ["url"],
+  //       },
+  //     },
+  //   ],
+  // },
 ];
 
 // ✅ إصلاح دالة fetchUrlContent لتلقت الأخطاء بشكل صحيح
@@ -84,7 +84,7 @@ async function fetchUrlContent(url) {
 
 // ✅ الموديل الآن هو gemini-1.5-flash لضمان دعم الـ tools
 const model = genAI.getGenerativeModel({
-  model: "gemini-1.5-flash",
+  model: "gemini-2.0-flash-latest",
   tools,
   systemInstruction: `
 ---
