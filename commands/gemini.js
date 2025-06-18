@@ -1,5 +1,7 @@
 // تم المراجعة والإصلاح بواسطة Gemini
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { GoogleAIFileManager } = require("@google/generative-ai/server");
+
 const logger = require("../utils/logger.js");
 const {
   getChatHistory,
@@ -10,7 +12,10 @@ const {
 const config = require("../config/config.json");
 const normalizeJid = require("../utils/normalizeJid.js");
 // const axios = require("axios"); // لم نعد نستخدم axios مباشرة هنا، fetch كفاية
-const { delay } = require("@whiskeysockets/baileys");
+const {
+  delay,
+  downloadContentFromMessage,
+} = require("@whiskeysockets/baileys");
 const fs = require("fs").promises; // ✅ لإضافة التعامل مع الملفات
 const path = require("path"); // ✅ لإضافة التعامل مع المسارات
 
@@ -116,6 +121,7 @@ while always understanding that I am and the \`sender_username\` are the in the 
 ---
   `,
 });
+const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
 
 module.exports = {
   name: "gemini",
@@ -161,17 +167,35 @@ module.exports = {
     // ✅ --- التعامل مع الصور والفيديوهات (Multimodal Input) ---
     if (msg.message?.imageMessage || msg.message?.videoMessage) {
       const mediaMessage = msg.message.imageMessage || msg.message.videoMessage;
-      const mediaBuffer = await sock.downloadMediaMessage(
+      const mediaBuffer = await downloadContentFromMessage(
         mediaMessage,
         "buffer"
       );
+      logger.debug(
+        `Media Buffer Size: ${mediaBuffer ? mediaBuffer.length : "null"}`
+      ); // ✅ ضيف السطر ده
+      if (!mediaBuffer) {
+        logger.error("Failed to download media buffer.");
+        await sock.sendMessage(chatId, {
+          text: "معرفتش أحمل الصورة/الفيديو ده يا معلم.",
+        });
+        return;
+      }
 
       // ✅ حفظ الملف مؤقتاً لرفعه لـ Gemini
       const tempFilePath = path.join(__dirname, `temp_media_${Date.now()}`);
       await fs.writeFile(tempFilePath, mediaBuffer);
 
       try {
-        const uploadResponse = await genAI.uploadFile(tempFilePath);
+        const uploadResponse = await fileManager.uploadFile(
+          tempFilePath, // الوسيط الأول: مسار الملف (String)
+          {
+            // الوسيط الثاني: كائن الخيارات (Object)
+            mimeType: mediaMessage.mimetype,
+            displayName: `media-${Date.now()}`, // اسم اختياري
+          }
+        );
+
         parts.push({
           fileData: {
             mimeType: mediaMessage.mimetype,
@@ -207,7 +231,7 @@ module.exports = {
       const audioMessage = msg.message.audioMessage;
       // ملاحظة: Baileys بينزل الفويس نوت كـ OGG/Opus عادة
       // Gemini بيدعم OGG/Opus/MP3. لو عندك مشاكل، ممكن تحتاج تحويل بـ ffmpeg
-      const audioBuffer = await sock.downloadMediaMessage(
+      const audioBuffer = await downloadContentFromMessage(
         audioMessage,
         "buffer"
       );
@@ -216,7 +240,10 @@ module.exports = {
       await fs.writeFile(tempAudioPath, audioBuffer);
 
       try {
-        const uploadResponse = await genAI.uploadFile(tempAudioPath);
+        const uploadResponse = await fileManager.uploadFile(tempAudioPath, {
+          mimeType: audioMessage.mimetype,
+          displayName: `audio-${Date.now()}`,
+        });
         parts.push({
           fileData: {
             mimeType: audioMessage.mimetype, // غالبا 'audio/ogg; codecs=opus'
@@ -258,10 +285,101 @@ module.exports = {
     const quotedMsg =
       msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
     if (quotedMsg) {
-      const quotedText =
+      let quotedMediaPart = null;
+      let quotedText =
         quotedMsg.conversation || quotedMsg.extendedTextMessage?.text;
-      if (quotedText) {
-        // ✅ إضافة الرسالة المقتبسة كجزء نصي في البداية
+
+      // فحص لو الرسالة المقتبسة كانت صورة/فيديو/صوت
+      if (
+        quotedMsg.imageMessage ||
+        quotedMsg.videoMessage ||
+        quotedMsg.audioMessage
+      ) {
+        const mediaType = quotedMsg.imageMessage
+          ? "image"
+          : quotedMsg.videoMessage
+          ? "video"
+          : "audio";
+        const mediaMessageInQuote =
+          quotedMsg.imageMessage ||
+          quotedMsg.videoMessage ||
+          quotedMsg.audioMessage;
+
+        logger.debug(`Detected quoted ${mediaType} message.`);
+
+        // ✅ -- الكود الصحيح لمعالجة الوسائط المقتبسة -- ✅
+        try {
+          // 1. الدالة تعيد ستريم، وليس بافر مباشرة
+          const stream = await downloadContentFromMessage(
+            mediaMessageInQuote,
+            mediaType
+          );
+
+          // 2. نقوم بتجميع بيانات الستريم في بافر
+          let mediaBuffer = Buffer.from([]);
+          for await (const chunk of stream) {
+            mediaBuffer = Buffer.concat([mediaBuffer, chunk]);
+          }
+
+          // 3. نتأكد أن البافر ليس فارغاً
+          if (!mediaBuffer.length) {
+            logger.error(
+              `Failed to download quoted ${mediaType}, buffer is empty.`
+            );
+            await sock.sendMessage(chatId, {
+              text: "فشلت في تحميل الميديا المقتبسة 😥.",
+            });
+          } else {
+            // 4. الآن نرفع الملف إلى Gemini بنفس طريقتك
+            const tempFilePath = path.join(
+              __dirname,
+              "..",
+              "media",
+              `temp_quoted_media_${Date.now()}`
+            );
+            await fs.writeFile(tempFilePath, mediaBuffer);
+
+            const uploadResponse = await fileManager.uploadFile(tempFilePath, {
+              mimeType: mediaMessageInQuote.mimetype,
+              displayName: `quoted-media-${Date.now()}`,
+            });
+            // ✅ --- الكود المصحح --- ✅
+            quotedMediaPart = {
+              fileData: {
+                mimeType: mediaMessageInQuote.mimetype,
+                fileUri: uploadResponse.file.uri, // <--- التصحيح
+              },
+            };
+
+            logger.info(
+              `Uploaded quoted media to Gemini: ${uploadResponse.file.uri}`
+            );
+
+            await fs.unlink(tempFilePath); // مسح الملف المؤقت
+          }
+        } catch (mediaError) {
+          // هذا الـ catch سيلتقط أي خطأ الآن، بما في ذلك "bad decrypt"
+          logger.error(
+            { err: mediaError },
+            `Failed to process quoted ${mediaType} message.`
+          );
+          await sock.sendMessage(chatId, {
+            text: "حدث خطأ أثناء معالجة الرسالة المقتبسة 😵‍💫.",
+          });
+        }
+      }
+
+      if (quotedMediaPart) {
+        // لو فيه ميديا مقتبسة، ضيفها للـ parts
+        parts.unshift(quotedMediaPart);
+        // لو فيه نص في الرسالة المقتبسة كمان، ضيفه كجزء نصي
+        if (quotedText) {
+          parts.unshift({
+            text: `بالاعتماد على هذه الرسالة كمرجع:\n"""\n${quotedText}\n"""\n\n`,
+          });
+        }
+      } else if (quotedText) {
+        // لو مفيش ميديا مقتبسة بس فيه نص، ضيف النص بس
         parts.unshift({
           text: `بالاعتماد على هذه الرسالة كمرجع:\n"""\n${quotedText}\n"""\n\nأجب على التالي:`,
         });
