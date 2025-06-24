@@ -1,30 +1,64 @@
-// file: /utils/logger.js
+const fs = require("fs");
+const path = require("path");
 const pino = require("pino");
+const rfs = require("rotating-file-stream");
 
-// This configuration sets up two destinations (transports) for our logs
+// Create logs directory if it doesn't exist
+const logDir = path.join(__dirname, "..", "logs");
+if (!fs.existsSync(logDir)) {
+  fs.mkdirSync(logDir);
+}
+
+// Create rotating streams
+const combinedStream = rfs.createStream("combined.log", {
+  interval: "1d", // rotate daily
+  path: logDir,
+});
+
+const errorStream = rfs.createStream("error.log", {
+  interval: "1d",
+  path: logDir,
+});
+
+// Pretty console logger
+const prettyTransport = {
+  target: "pino-pretty",
+  options: {
+    colorize: true,
+    translateTime: "SYS:dd-mm-yyyy HH:MM:ss",
+    ignore: "pid,hostname",
+  },
+};
+
+// Logger instance with multiple transports
 const transport = pino.transport({
   targets: [
     {
-      // Target 1: Log to the console with pretty, human-readable formatting
-      target: "pino-pretty",
+      target: "pino/file",
+      level: "trace",
       options: {
-        colorize: true, // Add colors
-        translateTime: "SYS:dd-mm-yyyy HH:MM:ss", // A nice timestamp format
-        ignore: "pid,hostname", // Don't show process ID and hostname
+        destination: path.join(__dirname, "../logs/combined.log"),
       },
     },
     {
-      // Target 2: Log to a file in standard JSON format
       target: "pino/file",
-      level: "trace", // Log everything to the file, even debug messages
+      level: "error",
       options: {
-        destination: `./bot.log`, // The log file will be created in the root directory
+        destination: path.join(__dirname, "../logs/error.log"),
+      },
+    },
+    {
+      target: "pino-pretty",
+      level: "info",
+      options: {
+        colorize: true,
+        translateTime: "SYS:dd-mm-yyyy HH:MM:ss",
+        ignore: "pid,hostname",
       },
     },
   ],
 });
 
-// Create and export the logger instance
 const logger = pino(transport);
 
 module.exports = logger;

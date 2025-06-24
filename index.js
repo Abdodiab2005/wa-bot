@@ -12,7 +12,6 @@ const path = require("path");
 const pino = require("pino"); // pino for logging
 const qrcode = require("qrcode-terminal");
 const NodeCache = require("node-cache"); // 1. استدعاء المكتبة
-const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs"); // File System module to read files
 require("dotenv").config();
 
@@ -34,6 +33,7 @@ const {
 const { server, io } = require("./app.js");
 const logger = require("./utils/logger");
 const { formatWhatsappToTelegram } = require("./utils/helper.js");
+const runTgBot = require("./utils/tg-bot");
 
 // Import secrets
 const PORT = process.env.PORT || 3000;
@@ -43,11 +43,6 @@ const ownerString = process.env.OWNERS_LIST || "";
 
 // Read the owners string from .env, split it into an array, and trim any whitespace
 config.owners = ownerString.split(",").map((id) => id.trim());
-
-// Prepare Telegram Bot
-const tgBot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
-  polling: true,
-});
 
 // Prepare channels sending
 (() => {
@@ -782,7 +777,8 @@ async function connectToWhatsApp() {
 }
 
 // --- Start the server ---
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   logger.info(`Server is running at http://localhost:${PORT}`);
+  await runTgBot();
   connectToWhatsApp().catch((err) => logger.error("Unexpected error: " + err));
 });
