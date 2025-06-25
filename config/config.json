@@ -1,4 +1,5 @@
 {
+  "prefix": "!",
   "command_permissions": {
     "ping": "MEMBERS",
     "yt": "MEMBERS",

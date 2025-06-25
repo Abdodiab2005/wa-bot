@@ -34,11 +34,13 @@ const { server, io } = require("./app.js");
 const logger = require("./utils/logger");
 const { formatWhatsappToTelegram } = require("./utils/helper.js");
 const runTgBot = require("./utils/tg-bot");
+const tgBot = require("./services/tg-bot");
 
 // Import secrets
 const PORT = process.env.PORT || 3000;
 const LOG_CHAT_ID = process.env.LOG_CHAT_ID;
 const CHANNELS = process.env.CHANNELS;
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 const ownerString = process.env.OWNERS_LIST || "";
 
 // Read the owners string from .env, split it into an array, and trim any whitespace
@@ -238,7 +240,13 @@ async function connectToWhatsApp() {
         retryCount++; // Increase retry count
         const delayMs = RETRY_DELAY_MS * retryCount; // Increase delay (5s, 10s, 15s...)
 
-        logger.info(
+        logger.warn(
+          `🔌 Connection closed. Reason: ${statusCode}. Retrying in ${
+            delayMs / 1000
+          }s... (Attempt ${retryCount}/${MAX_RETRIES})`
+        );
+        tgBot.sendMessage(
+          ADMIN_CHAT_ID,
           `🔌 Connection closed. Reason: ${statusCode}. Retrying in ${
             delayMs / 1000
           }s... (Attempt ${retryCount}/${MAX_RETRIES})`
@@ -250,15 +258,24 @@ async function connectToWhatsApp() {
         logger.error(
           "❌ Connection closed permanently. Reason: Logged Out. Please delete the 'auth_info_baileys' folder and scan again."
         );
+        tgBot.sendMessage(
+          ADMIN_CHAT_ID,
+          "❌ Connection closed permanently. Reason: Logged Out. Please delete the 'auth_info_baileys' folder and scan again."
+        );
         process.exit(1);
       } else {
         logger.error(
+          `❌ Max retries (${MAX_RETRIES}) reached. Could not connect to WhatsApp. Exiting.`
+        );
+        tgBot.sendMessage(
+          ADMIN_CHAT_ID,
           `❌ Max retries (${MAX_RETRIES}) reached. Could not connect to WhatsApp. Exiting.`
         );
         process.exit(1);
       }
     } else if (connection === "open") {
       logger.info("✅ Connection opened successfully!");
+      tgBot.sendMessage(ADMIN_CHAT_ID, "✅ Connection opened successfully!");
       retryCount = 0;
       io.emit("status_update", { status: "Connected" });
 
@@ -342,6 +359,10 @@ async function connectToWhatsApp() {
         const whatsappChannel = msg.key.remoteJid;
         const telegramChannel = await getTelegramId(whatsappChannel);
         logger.info(`sending to channel: ${telegramChannel}`);
+        tgBot.sendMessage(
+          ADMIN_CHAT_ID,
+          `sending to channel: ${telegramChannel}`
+        );
         if (!telegramChannel) return;
 
         const type = Object.keys(msg.message || {})[0];
@@ -428,6 +449,10 @@ async function connectToWhatsApp() {
         }
       } catch (error) {
         logger.error(`Error sending message to telegram: ${error.message}`);
+        tgBot.sendMessage(
+          ADMIN_CHAT_ID,
+          `Error sending message to telegram: ${error.message}`
+        );
       }
     }
 
@@ -587,9 +612,14 @@ async function connectToWhatsApp() {
           logger.warn(
             "Could not find the deleted message in cache (it was probably sent while bot was offline)."
           );
+          tgBot.sendMessage(
+            ADMIN_CHAT_ID,
+            "Could not find the deleted message in cache (it was probably sent while bot was offline)."
+          );
         }
       } catch (error) {
         logger.error({ err: error }, "Error in Anti-Delete system.");
+        tgBot.sendMessage(ADMIN_CHAT_ID, "Error in Anti-Delete system.");
       }
 
       return; // IMPORTANT: Stop all further processing for this event.
@@ -651,6 +681,10 @@ async function connectToWhatsApp() {
         logger.error(
           { err: error, command: commandName },
           "Error executing command"
+        );
+        tgBot.sendMessage(
+          ADMIN_CHAT_ID,
+          `Error executing command: ${error.message}`
         );
       }
     } else {
@@ -734,6 +768,10 @@ async function connectToWhatsApp() {
         { err: error, update },
         "Error in group-participants.update event"
       );
+      tgBot.sendMessage(
+        ADMIN_CHAT_ID,
+        "Error in group-participants.update event"
+      );
     }
   });
 
@@ -771,14 +809,14 @@ async function connectToWhatsApp() {
         }
       } catch (error) {
         logger.error({ err: error, request }, "Error in auto-approve event");
+        tgBot.sendMessage(ADMIN_CHAT_ID, "Error in auto-approve event");
       }
     }
   });
 }
 
 // --- Start the server ---
-server.listen(PORT, async () => {
-  logger.info(`Server is running at http://localhost:${PORT}`);
+(async () => {
   await runTgBot();
   connectToWhatsApp().catch((err) => logger.error("Unexpected error: " + err));
-});
+})();
